@@ -1,0 +1,29 @@
+{
+  "scenario_id": "P2_TEST_001",
+  "requests": [
+    {
+      "request_id": "REQ_A",
+      "satellite_id": "SAT_A",
+      "required_contact_seconds": 900,
+      "priority": 9,
+      "eligible_station_ids": ["GS_1"],
+      "mandatory": false
+    },
+    {
+      "request_id": "REQ_B",
+      "satellite_id": "SAT_B",
+      "required_contact_seconds": 900,
+      "priority": 5,
+      "eligible_station_ids": ["GS_1"],
+      "mandatory": false
+    },
+    {
+      "request_id": "REQ_C",
+      "satellite_id": "SAT_C",
+      "required_contact_seconds": 600,
+      "priority": 7,
+      "eligible_station_ids": ["GS_1"],
+      "mandatory": false
+    }
+  ]
+}
