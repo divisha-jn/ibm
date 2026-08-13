@@ -1,0 +1,21 @@
+# Python cache
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Virtual environments
+venv/
+.venv/
+
+# macOS
+.DS_Store
+
+# VS Code local settings
+.vscode/
+
+# Generated runtime outputs
+backend/data/generated/*.json
+
+# Environment variables / secrets
+.env
+.env.*
