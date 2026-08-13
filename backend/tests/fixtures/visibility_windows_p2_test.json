@@ -1,0 +1,45 @@
+{
+  "planning_horizon": {
+    "start": "2026-08-15T00:00:00Z",
+    "end": "2026-08-16T00:00:00Z"
+  },
+  "minimum_elevation_deg": 10.0,
+  "visibility_windows": [
+    {
+      "window_id": "VW_001",
+      "satellite_id": "SAT_A",
+      "station_id": "GS_1",
+      "aos": "2026-08-15T10:00:00Z",
+      "los": "2026-08-15T10:20:00Z",
+      "duration_seconds": 1200,
+      "max_elevation_deg": 45.0
+    },
+    {
+      "window_id": "VW_002",
+      "satellite_id": "SAT_B",
+      "station_id": "GS_1",
+      "aos": "2026-08-15T10:05:00Z",
+      "los": "2026-08-15T10:25:00Z",
+      "duration_seconds": 1200,
+      "max_elevation_deg": 35.0
+    },
+    {
+      "window_id": "VW_003",
+      "satellite_id": "SAT_C",
+      "station_id": "GS_1",
+      "aos": "2026-08-15T10:30:00Z",
+      "los": "2026-08-15T10:50:00Z",
+      "duration_seconds": 1200,
+      "max_elevation_deg": 51.0
+    },
+    {
+      "window_id": "VW_004",
+      "satellite_id": "SAT_B",
+      "station_id": "GS_2",
+      "aos": "2026-08-15T11:00:00Z",
+      "los": "2026-08-15T11:20:00Z",
+      "duration_seconds": 1200,
+      "max_elevation_deg": 40.0
+    }
+  ]
+}
