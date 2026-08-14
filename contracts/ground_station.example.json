@@ -1,0 +1,18 @@
+[
+  {
+    "id": "GS-SG",
+    "name": "Singapore Ground Station",
+    "latitude": 1.3521,
+    "longitude": 103.8198,
+    "elevation_m": 15,
+    "min_elevation_deg": 10
+  },
+  {
+    "id": "GS-PERTH",
+    "name": "Perth Ground Station",
+    "latitude": -31.9523,
+    "longitude": 115.8613,
+    "elevation_m": 20,
+    "min_elevation_deg": 10
+  }
+]

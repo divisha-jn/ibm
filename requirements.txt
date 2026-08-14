@@ -1,5 +1,8 @@
 ortools
 pytest
+skyfield>=1.49
+requests>=2.31
+pytest>=8.0
 fastapi==0.104.1
 uvicorn==0.24.0
 pydantic==2.5.2
