@@ -99,9 +99,8 @@ def find_visibility_windows(
                 VisibilityWindow(
                     satellite=satellite_label or sat.name,
                     station=station.id,
-                    visibility_start=rise_time.utc_datetime().replace(microsecond=0).isoformat(),
-                    visibility_end=set_time.utc_datetime().replace(microsecond=0).isoformat(),
-                    max_elevation_deg=round(max_elevation, 1),
+                    visibility_start=rise_time.utc_datetime().replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+                    visibility_end=set_time.utc_datetime().replace(microsecond=0).isoformat().replace("+00:00", "Z"),
                     duration_seconds=int(duration),
                 )
             )
