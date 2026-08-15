@@ -2,8 +2,8 @@
   {
     "satellite": "ISS (ZARYA)",
     "station": "GS-SG",
-    "visibility_start": "2026-08-20T10:12:00+00:00",
-    "visibility_end": "2026-08-20T10:21:00+00:00",
+    "visibility_start": "2026-08-20T10:12:00Z",
+    "visibility_end": "2026-08-20T10:21:00Z",
     "max_elevation_deg": 37.0,
     "duration_seconds": 540
   }
