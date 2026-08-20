@@ -20,10 +20,6 @@ MISSION_REQUESTS_PATH = REPO_ROOT / "data" / "mission_requests.json"
 
 
 def load_scenario(scenario_id: str) -> Dict[str, Any]:
-<<<<<<< Updated upstream
-    # TODO: In production, load from a database or shared file.
-    # For now, return complete requests suitable for deterministic scheduling.
-=======
     """
     Load the mission scenario for scenario_id from data/mission_requests.json.
 
@@ -41,7 +37,6 @@ def load_scenario(scenario_id: str) -> Dict[str, Any]:
             return copy.deepcopy(data)
 
     # Fallback — keeps /what-if alive on machines without the data file.
->>>>>>> Stashed changes
     return {
         "scenario_id": scenario_id,
         "requests": [
@@ -50,11 +45,7 @@ def load_scenario(scenario_id: str) -> Dict[str, Any]:
                 "satellite_id": "NORAD_25544",
                 "required_contact_seconds": 300,
                 "priority": 8,
-<<<<<<< Updated upstream
-                "eligible_station_ids": ["GS-SG", "GS-PERTH"],
-=======
                 "eligible_station_ids": ["GS_SG_01", "GS_PERTH_01"],
->>>>>>> Stashed changes
                 "mandatory": False,
             },
             {
@@ -62,17 +53,10 @@ def load_scenario(scenario_id: str) -> Dict[str, Any]:
                 "satellite_id": "NORAD_48274",
                 "required_contact_seconds": 300,
                 "priority": 5,
-<<<<<<< Updated upstream
-                "eligible_station_ids": ["GS-SG", "GS-PERTH"],
-                "mandatory": False,
-            },
-        ]
-=======
                 "eligible_station_ids": ["GS_SG_01", "GS_PERTH_01"],
                 "mandatory": False,
             },
         ],
->>>>>>> Stashed changes
     }
 
 
@@ -113,12 +97,6 @@ def apply_operations_to_scenario(
             for req in temp["requests"]:
                 if req["request_id"] == op.request_id:
                     req["priority"] = op.value
-<<<<<<< Updated upstream
-                    
-        # Add more operations as Person 3 supports them (DISABLE_STATION, SET_ELIGIBLE_STATIONS, etc.)
-        
-    return temp_scenario
-=======
 
         elif op.operation == "SET_REQUIRED_DURATION":
             for req in temp["requests"]:
@@ -141,4 +119,3 @@ def apply_operations_to_scenario(
             log.warning("apply_operations_to_scenario: unknown operation %r — skipped.", op.operation)
 
     return temp
->>>>>>> Stashed changes

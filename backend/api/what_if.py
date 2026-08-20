@@ -24,8 +24,10 @@ explain_conflict()   → falls back to _build_explanation_from_ops() when
                        pipeline is not running.
 """
 
+import json
 import logging
 import uuid
+from typing import Dict
 
 from backend.api.schemas import (
     IntentInterpretation,
@@ -34,14 +36,12 @@ from backend.api.schemas import (
     WhatIfResponse,
     WhatIfResult,
 )
-from backend.api.scenario import load_scenario, apply_operations_to_scenario
+from backend.api.scenario import (
+    load_scenario,
+    apply_operations_to_scenario,
+    MISSION_REQUESTS_PATH,
+)
 from backend.api.comparison import compare_schedules
-<<<<<<< Updated upstream
-from backend.api.scheduling import obtain_visibility_data, run_scheduling
-
-# Mock function standing in for Person 3's intent parsing.
-def mock_parse_intent(query: str) -> IntentInterpretation:
-=======
 from backend.api.data_pipeline import (
     build_live_schedule,
     build_live_what_if_schedule,
@@ -49,6 +49,17 @@ from backend.api.data_pipeline import (
 )
 
 logger = logging.getLogger(__name__)
+
+# In-memory store of what-if results that are eligible to be committed as the
+# new scenario baseline. Keyed by what_if_id; cleared on apply. Only holds
+# results computed against the live solver (can_apply=True) — mock-fallback
+# results are never eligible. Process-lifetime only, matches the rest of the
+# app's single-dev-process demo scope; a restart drops pending what-ifs.
+_PENDING_WHAT_IFS: Dict[str, dict] = {}
+
+
+class WhatIfNotApplicableError(Exception):
+    """Raised when apply_what_if is called with an unknown or expired what_if_id."""
 
 
 # ---------------------------------------------------------------------------
@@ -65,7 +76,6 @@ def _interpretation_from_granite(wi) -> IntentInterpretation:
     + re-validate) so any future divergence between the two models is a compile-
     time error here rather than a silent runtime mismatch.
     """
->>>>>>> Stashed changes
     return IntentInterpretation(
         intent=wi.intent,
         operations=[
@@ -82,8 +92,6 @@ def _interpretation_from_granite(wi) -> IntentInterpretation:
         error=wi.error,
     )
 
-<<<<<<< Updated upstream
-=======
 
 # ---------------------------------------------------------------------------
 # Intent parsing  —  real P3 call with mock fallback
@@ -236,7 +244,6 @@ def _build_explanation_from_ops(
 # Orchestration
 # ---------------------------------------------------------------------------
 
->>>>>>> Stashed changes
 def process_what_if_query(request: WhatIfRequest) -> WhatIfResponse:
     what_if_id = f"WI_{uuid.uuid4().hex[:6].upper()}"
 
@@ -265,19 +272,6 @@ def process_what_if_query(request: WhatIfRequest) -> WhatIfResponse:
     result = None
 
     if intent.requires_resolve:
-<<<<<<< Updated upstream
-        # 3. Ask OR-Tools (Person 2) to solve the base and temporary scenarios.
-        visibility_data = obtain_visibility_data()
-        old_run = run_scheduling(visibility_data, base_scenario)
-        new_run = run_scheduling(visibility_data, temp_scenario)
-        old_schedule = old_run.schedule_result
-        new_schedule = new_run.schedule_result
-        
-        # 4. Compare results to generate impact
-        impact = compare_schedules(old_schedule, new_schedule)
-        
-        # 5. Build final result
-=======
         # 3. Apply mutations to a sandbox copy of the scenario
         temp_scenario = apply_operations_to_scenario(base_scenario, intent.operations)
 
@@ -304,7 +298,6 @@ def process_what_if_query(request: WhatIfRequest) -> WhatIfResponse:
         # 8. Natural-language explanation  (P3, with op-based fallback)
         explanation = _get_explanation(intent, new_schedule, evidence_envelope)
 
->>>>>>> Stashed changes
         result = WhatIfResult(
             solver_status=new_schedule["solver"]["status"],
             impact=impact,
@@ -313,15 +306,43 @@ def process_what_if_query(request: WhatIfRequest) -> WhatIfResponse:
             can_apply=using_live,
         )
 
+        if using_live:
+            _PENDING_WHAT_IFS[what_if_id] = {
+                "scenario": temp_scenario,
+                "schedule": new_schedule,
+            }
+
     # intent == "UNSUPPORTED": result stays None (valid per Optional[WhatIfResult])
     return WhatIfResponse(
         what_if_id=what_if_id,
         base_scenario_id=request.base_scenario_id,
         user_query=request.user_query,
         interpretation=intent,
-<<<<<<< Updated upstream
-        result=result
-=======
         result=result,
->>>>>>> Stashed changes
     )
+
+
+def apply_what_if(what_if_id: str) -> dict:
+    """
+    Commit a previously computed what-if result as the new scenario baseline.
+
+    Overwrites data/mission_requests.json with the mutated scenario from
+    what_if_id, so subsequent /schedule and /what-if calls start from this
+    new state. One-time use — the pending entry is removed on success, so
+    re-applying the same what_if_id raises WhatIfNotApplicableError.
+
+    Raises WhatIfNotApplicableError when what_if_id is unknown, already
+    applied, or was computed without the live solver (can_apply=False).
+    """
+    pending = _PENDING_WHAT_IFS.pop(what_if_id, None)
+    if pending is None:
+        raise WhatIfNotApplicableError(
+            f"No applicable what-if result for {what_if_id!r} — unknown id, "
+            "already applied, or computed without the live solver."
+        )
+
+    with open(MISSION_REQUESTS_PATH, "w", encoding="utf-8") as f:
+        json.dump(pending["scenario"], f, indent=2)
+
+    logger.info("Applied what-if %s as the new scenario baseline.", what_if_id)
+    return pending["schedule"]

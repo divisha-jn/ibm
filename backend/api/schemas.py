@@ -92,3 +92,17 @@ class WhatIfResponse(BaseModel):
     user_query: str
     interpretation: IntentInterpretation
     result: Optional[WhatIfResult]     # None when intent == "UNSUPPORTED"
+
+# ---------------------------------------------------------------------------
+# What-if apply — commits a previously computed what-if result as the new
+# scenario baseline (persisted to data/mission_requests.json).
+# ---------------------------------------------------------------------------
+
+class ApplyWhatIfRequest(BaseModel):
+    what_if_id: str
+
+class ApplyWhatIfResponse(BaseModel):
+    applied: bool
+    what_if_id: str
+    scenario_id: str
+    schedule: Dict[str, Any]  # full contract #5 shape — the newly-committed baseline

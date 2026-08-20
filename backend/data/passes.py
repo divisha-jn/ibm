@@ -17,11 +17,7 @@ Usage:
 from __future__ import annotations
 
 import json
-<<<<<<< Updated upstream
 from dataclasses import dataclass
-=======
-from dataclasses import dataclass, field, asdict
->>>>>>> Stashed changes
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -52,32 +48,25 @@ class VisibilityWindow:
     so the dict output can be fed directly to the solver and frontend.
     """
 
-<<<<<<< Updated upstream
-    satellite_id: str
-    satellite: str
-    station: str
-    visibility_start: str  # ISO 8601 UTC
-    visibility_end: str  # ISO 8601 UTC
-    max_elevation_deg: float
-=======
-    window_id: str          # e.g. "VW_0001"
-    satellite_id: str       # e.g. "NORAD_25544"
-    station_id: str         # e.g. "GS_SG_01"
-    aos: str                # ISO 8601 UTC, e.g. "2026-08-11T02:13:18Z"
-    los: str                # ISO 8601 UTC
->>>>>>> Stashed changes
+    window_id: str           # e.g. "VW_0001"
+    satellite_id: str        # e.g. "NORAD_25544"
+    satellite: str           # display name, e.g. "ISS (ZARYA)"
+    station_id: str          # e.g. "GS_SG_01"
+    aos: str                 # ISO 8601 UTC, e.g. "2026-08-11T02:13:18Z"
+    los: str                 # ISO 8601 UTC
     duration_seconds: int
     max_elevation_deg: float
-    source: Dict            # orbit provenance metadata
+    source: Dict             # orbit provenance metadata
 
     def to_dict(self) -> dict:
-        # Keep the frozen P1 visibility contract unchanged. ``satellite_id``
-        # is retained as internal provenance for the P1 -> P2 adapter.
+        # Keep the frozen P1 visibility contract unchanged. ``window_id``,
+        # ``satellite_id`` and ``source`` are retained as internal provenance
+        # for the P1 -> P2 adapter but are not part of the frozen contract.
         return {
             "satellite": self.satellite,
-            "station": self.station,
-            "visibility_start": self.visibility_start,
-            "visibility_end": self.visibility_end,
+            "station": self.station_id,
+            "visibility_start": self.aos,
+            "visibility_end": self.los,
             "max_elevation_deg": self.max_elevation_deg,
             "duration_seconds": self.duration_seconds,
         }
@@ -167,24 +156,15 @@ def find_visibility_windows(
             idx = window_id_offset + len(windows) + 1
             windows.append(
                 VisibilityWindow(
-<<<<<<< Updated upstream
-                    satellite_id=f"NORAD_{int(sat.model.satnum)}",
-                    satellite=satellite_label or sat.name,
-                    station=station.id,
-                    visibility_start=rise_time.utc_datetime().replace(microsecond=0).isoformat().replace("+00:00", "Z"),
-                    visibility_end=set_time.utc_datetime().replace(microsecond=0).isoformat().replace("+00:00", "Z"),
-                    max_elevation_deg=float(max_elevation),
-                    duration_seconds=int(duration),
-=======
                     window_id=f"VW_{idx:04d}",
                     satellite_id=sat_id,
+                    satellite=sat.name.strip(),
                     station_id=station.id,
                     aos=_to_z(rise_time.utc_datetime()),
                     los=_to_z(set_time.utc_datetime()),
                     duration_seconds=duration,
                     max_elevation_deg=round(max_elevation, 1),
                     source=source,
->>>>>>> Stashed changes
                 )
             )
             rise_time = None
