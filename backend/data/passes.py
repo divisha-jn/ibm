@@ -141,6 +141,23 @@ def save_visibility_windows(windows: List[VisibilityWindow], filename: str = "vi
         json.dump([w.to_dict() for w in windows], f, indent=2)
     return out_path
 
+def get_visibility_windows(
+    horizon_hours: int = 48,
+    force_refresh_celestrak: bool = False,
+) -> List[dict]:
+    """Convenience wrapper for Person 4's backend: one call that returns
+    ready-to-serve plain dicts (JSON-serializable) matching Contract #3,
+    instead of needing to call generate + save + to_dict separately.
+
+    Example:
+        from backend.data.passes import get_visibility_windows
+        windows = get_visibility_windows()   # -> list[dict], ready for a JSON response
+    """
+    windows = generate_all_visibility_windows(
+        horizon_hours=horizon_hours, force_refresh_celestrak=force_refresh_celestrak
+    )
+    return [w.to_dict() for w in windows]
+
 
 def _day1_single_pass_demo() -> None:
     """Day-1 goal: retrieve one real satellite from CelesTrak and print one
