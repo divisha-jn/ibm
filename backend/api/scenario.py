@@ -4,12 +4,26 @@ from backend.api.schemas import IntentOperation
 
 def load_scenario(scenario_id: str) -> Dict[str, Any]:
     # TODO: In production, load from a database or shared file.
-    # For now, returning a mock based on the mission_requests contract.
+    # For now, return complete requests suitable for deterministic scheduling.
     return {
         "scenario_id": scenario_id,
         "requests": [
-            {"request_id": "REQ_001", "priority": 8},
-            {"request_id": "REQ_002", "priority": 5}
+            {
+                "request_id": "REQ_001",
+                "satellite_id": "NORAD_25544",
+                "required_contact_seconds": 300,
+                "priority": 8,
+                "eligible_station_ids": ["GS-SG", "GS-PERTH"],
+                "mandatory": False,
+            },
+            {
+                "request_id": "REQ_002",
+                "satellite_id": "NORAD_48274",
+                "required_contact_seconds": 300,
+                "priority": 5,
+                "eligible_station_ids": ["GS-SG", "GS-PERTH"],
+                "mandatory": False,
+            },
         ]
     }
 
