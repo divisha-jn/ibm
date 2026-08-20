@@ -1,0 +1,29 @@
+{
+  "scenario_id": "P2_REALISTIC_INTEGRATION_001",
+  "requests": [
+    {
+      "request_id": "REQ_ISS_DOWNLINK",
+      "satellite_id": "NORAD_25544",
+      "required_contact_seconds": 600,
+      "priority": 9,
+      "eligible_station_ids": ["GS-SG"],
+      "mandatory": false
+    },
+    {
+      "request_id": "REQ_HST_DOWNLINK",
+      "satellite_id": "NORAD_20580",
+      "required_contact_seconds": 600,
+      "priority": 5,
+      "eligible_station_ids": ["GS-SG"],
+      "mandatory": false
+    },
+    {
+      "request_id": "REQ_AQUA_DOWNLINK",
+      "satellite_id": "NORAD_27424",
+      "required_contact_seconds": 600,
+      "priority": 7,
+      "eligible_station_ids": ["GS-SG"],
+      "mandatory": false
+    }
+  ]
+}

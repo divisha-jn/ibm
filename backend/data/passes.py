@@ -17,7 +17,7 @@ Usage:
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import List
@@ -39,6 +39,7 @@ _TS = load.timescale()
 class VisibilityWindow:
     """Matches contracts/visibility_windows.example.json"""
 
+    satellite_id: str
     satellite: str
     station: str
     visibility_start: str  # ISO 8601 UTC
@@ -47,7 +48,16 @@ class VisibilityWindow:
     duration_seconds: int
 
     def to_dict(self) -> dict:
-        return asdict(self)
+        # Keep the frozen P1 visibility contract unchanged. ``satellite_id``
+        # is retained as internal provenance for the P1 -> P2 adapter.
+        return {
+            "satellite": self.satellite,
+            "station": self.station,
+            "visibility_start": self.visibility_start,
+            "visibility_end": self.visibility_end,
+            "max_elevation_deg": self.max_elevation_deg,
+            "duration_seconds": self.duration_seconds,
+        }
 
 
 def satellite_from_omm(omm_json: dict) -> EarthSatellite:
@@ -97,10 +107,12 @@ def find_visibility_windows(
             duration = (set_time.utc_datetime() - rise_time.utc_datetime()).total_seconds()
             windows.append(
                 VisibilityWindow(
+                    satellite_id=f"NORAD_{int(sat.model.satnum)}",
                     satellite=satellite_label or sat.name,
                     station=station.id,
                     visibility_start=rise_time.utc_datetime().replace(microsecond=0).isoformat().replace("+00:00", "Z"),
                     visibility_end=set_time.utc_datetime().replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+                    max_elevation_deg=float(max_elevation),
                     duration_seconds=int(duration),
                 )
             )
