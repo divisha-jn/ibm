@@ -1,5 +1,8 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
+from backend.api.explanations import explain_request_conflict
 from backend.api.schemas import ExplainRequest, ExplainResponse, WhatIfRequest, WhatIfResponse
+from backend.api.scenario import load_scenario
+from backend.api.scheduling import obtain_visibility_data, run_scheduling
 from backend.api.what_if import process_what_if_query
 
 router = APIRouter()
@@ -10,32 +13,9 @@ def get_schedule():
     Returns the baseline schedule. Connected to Person 2's solver output.
     Returns Contract #5.
     """
-    return {
-      "scenario_id": "DEMO_001",
-      "solver": {
-        "engine": "OR-Tools CP-SAT",
-        "status": "OPTIMAL",
-        "objective_value": 13.0
-      },
-      "scheduled_contacts": [
-        {
-          "request_id": "REQ_001",
-          "satellite_id": "NORAD_20580",
-          "station_id": "GS_SG_01",
-          "scheduled_start": "2026-08-11T02:14:00Z",
-          "scheduled_end": "2026-08-11T02:19:00Z",
-          "duration_seconds": 300,
-          "priority": 8
-        }
-      ],
-      "unscheduled_requests": [
-        {
-          "request_id": "REQ_002",
-          "satellite_id": "NORAD_XXXXX",
-          "reason_codes": ["ANTENNA_RESOURCE_CONFLICT"]
-        }
-      ]
-    }
+    visibility_data = obtain_visibility_data()
+    mission_data = load_scenario("DEMO_001")
+    return run_scheduling(visibility_data, mission_data).schedule_result
 
 @router.post("/explain", response_model=ExplainResponse)
 def explain_conflict(request: ExplainRequest):
@@ -43,9 +23,21 @@ def explain_conflict(request: ExplainRequest):
     Returns a Granite-generated explanation based on conflict evidence.
     Connected to Person 3's explain.py module.
     """
+    visibility_data = obtain_visibility_data()
+    mission_data = load_scenario(request.scenario_id)
+    scheduling_run = run_scheduling(visibility_data, mission_data)
+
+    try:
+        explanation = explain_request_conflict(
+            scheduling_run.conflict_evidence,
+            request.request_id,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
     return ExplainResponse(
         request_id=request.request_id,
-        explanation=f"Mission {request.request_id} was denied because it overlaps with REQ_001 on GS_SG_01 by 4 minutes. REQ_001 has a higher priority (8 vs 5)."
+        explanation=explanation,
     )
 
 @router.post("/what-if", response_model=WhatIfResponse)

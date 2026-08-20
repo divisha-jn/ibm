@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from .granite import GraniteClient
 from .prompts import build_explain_messages
+
+if TYPE_CHECKING:
+    from .granite import GraniteClient
 
 
 def explain_conflict(
@@ -24,7 +26,12 @@ def explain_conflict(
     if not evidence.get("evidence"):
         raise ValueError("No conflict evidence was supplied.")
 
-    granite = client or GraniteClient()
+    if client is None:
+        from .granite import GraniteClient
+
+        client = GraniteClient()
+
+    granite = client
     return granite.chat(
         build_explain_messages(evidence),
         max_completion_tokens=300,
