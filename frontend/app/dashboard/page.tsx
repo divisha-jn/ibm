@@ -1,4 +1,5 @@
 import MissionGantt from "../../components/MissionGantt";
+import WhatIfChat from "../../components/WhatIfChat";
 
 export default function DashboardPage() {
   return (
@@ -20,7 +21,18 @@ export default function DashboardPage() {
       >
         MISSION OPS COPILOT
       </h1>
-      <MissionGantt />
+
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "2fr 1fr",
+          gap: 24,
+          alignItems: "start",
+        }}
+      >
+        <MissionGantt />
+        <WhatIfChat scenarioId="DEMO_001" />
+      </div>
     </main>
   );
 }
