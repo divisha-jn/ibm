@@ -1,8 +1,9 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
 import styles from "./MissionGantt.module.css";
-import { mockMissions, PLANNING_HORIZON, Mission } from "../data/mockMissions";
+import { Mission } from "../data/mockMissions";
+import { fetchSchedule, fetchExplanation } from "../lib/api";
 
 function toMinutes(iso: string, horizonStart: number) {
   return (new Date(iso).getTime() - horizonStart) / 60000;
@@ -17,19 +18,48 @@ function formatTime(ms: number) {
 
 export default function MissionGantt() {
   const [selected, setSelected] = useState<Mission | null>(null);
+  const [missions, setMissions] = useState<Mission[]>([]);
+  const [explanation, setExplanation] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
 
-  const horizonStart = new Date(PLANNING_HORIZON.start).getTime();
-  const horizonEnd = new Date(PLANNING_HORIZON.end).getTime();
-  const totalMinutes = (horizonEnd - horizonStart) / 60000;
+  useEffect(() => {
+    fetchSchedule()
+      .then(setMissions)
+      .catch((err) => console.error("Failed to load schedule:", err));
+  }, []);
+
+  // Horizon is now derived from real mission data instead of a hardcoded
+  // constant — otherwise real backend timestamps (different dates than our
+  // old mock data) fall outside a fixed range and never render.
+  const horizonStart = useMemo(() => {
+    if (missions.length === 0) return Date.now();
+    const starts = missions
+      .filter((m) => m.visibility_start)
+      .map((m) => new Date(m.visibility_start).getTime());
+    return starts.length ? Math.min(...starts) : Date.now();
+  }, [missions]);
+
+  const horizonEnd = useMemo(() => {
+    if (missions.length === 0) return Date.now() + 3600000;
+    const ends = missions
+      .filter((m) => m.visibility_end)
+      .map((m) => new Date(m.visibility_end).getTime());
+    return ends.length ? Math.max(...ends) : Date.now() + 3600000;
+  }, [missions]);
+
+  const totalMinutes = Math.max((horizonEnd - horizonStart) / 60000, 1);
 
   const stations = useMemo(
-    () => Array.from(new Set(mockMissions.map((m) => m.station))),
-    []
+    () => Array.from(new Set(missions.filter((m) => m.visibility_start).map((m) => m.station))),
+    [missions]
   );
 
   const ticks = useMemo(() => {
     const out: { label: string; pct: number }[] = [];
-    for (let t = 0; t <= totalMinutes; t += 30) {
+    // Pick a reasonable tick interval based on total span, so short demo
+    // windows and longer real horizons both get readable axis labels.
+    const stepMinutes = totalMinutes > 180 ? 30 : totalMinutes > 60 ? 15 : 5;
+    for (let t = 0; t <= totalMinutes; t += stepMinutes) {
       const date = new Date(horizonStart + t * 60000);
       out.push({
         label: formatTime(date.getTime()),
@@ -39,20 +69,36 @@ export default function MissionGantt() {
     return out;
   }, [totalMinutes, horizonStart]);
 
-  const rejected = mockMissions.filter((m) => m.status === "rejected");
+  const rejected = missions.filter((m) => m.status === "rejected");
+
+  async function handleClick(m: Mission) {
+    setSelected(m);
+    if (m.status === "rejected") {
+      setLoading(true);
+      setExplanation(null);
+      try {
+        const text = await fetchExplanation("DEMO_001", m.mission_id);
+        setExplanation(text);
+      } catch (err) {
+        setExplanation("Failed to load explanation — is the backend running?");
+      } finally {
+        setLoading(false);
+      }
+    }
+  }
 
   return (
     <div className={styles.wrapper}>
       <div className={styles.header}>
         <span className={styles.title}>Schedule — Planning Horizon</span>
         <span className={styles.horizon}>
-          {PLANNING_HORIZON.start.slice(11, 16)}Z – {PLANNING_HORIZON.end.slice(11, 16)}Z
+          {formatTime(horizonStart)} – {formatTime(horizonEnd)}
         </span>
       </div>
 
       <div className={styles.axis}>
-        {ticks.map((t) => (
-          <span key={t.label} className={styles.axisTick} style={{ left: `${t.pct}%` }}>
+        {ticks.map((t, i) => (
+          <span key={`${t.label}-${i}`} className={styles.axisTick} style={{ left: `${t.pct}%` }}>
             {t.label}
           </span>
         ))}
@@ -62,8 +108,8 @@ export default function MissionGantt() {
         <div key={station} className={styles.row}>
           <div className={styles.stationLabel}>{station}</div>
           <div className={styles.track}>
-            {mockMissions
-              .filter((m) => m.station === station)
+            {missions
+              .filter((m) => m.station === station && m.visibility_start)
               .map((m) => {
                 const startPct =
                   (toMinutes(m.visibility_start, horizonStart) / totalMinutes) * 100;
@@ -75,7 +121,7 @@ export default function MissionGantt() {
                       m.status === "rejected" ? styles.rejected : styles.scheduled
                     }`}
                     style={{ left: `${startPct}%`, width: `${Math.max(widthPct, 6)}%` }}
-                    onClick={() => setSelected(m)}
+                    onClick={() => handleClick(m)}
                     title={`${m.mission_id} — ${m.status}`}
                   >
                     {m.mission_id}
@@ -101,14 +147,17 @@ export default function MissionGantt() {
         <div className={styles.rejectedList}>
           {rejected.map((m) => (
             <div key={m.mission_id} className={styles.rejectedItem}>
-              ⚠ {m.mission_id} rejected — conflicts with {m.rejection?.conflicts_with} on{" "}
-              {m.station} ({m.rejection?.overlap_minutes}min overlap, priority {m.priority} vs{" "}
-              {m.rejection?.conflicting_priority})
-              {selected?.mission_id === m.mission_id && (
-                <span> — click "Why?" in the AI Copilot panel (coming Day 2) for the explanation</span>
-              )}
+              ⚠ {m.mission_id} rejected
+              {m.rejection?.reason ? ` — ${m.rejection.reason}` : ""}
             </div>
           ))}
+        </div>
+      )}
+
+      {selected && selected.status === "rejected" && (
+        <div className={styles.rejectedList}>
+          <strong>AI Copilot:</strong>{" "}
+          {loading ? "Thinking..." : explanation}
         </div>
       )}
     </div>
