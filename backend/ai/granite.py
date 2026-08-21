@@ -16,7 +16,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 DEFAULT_WATSONX_URL = "https://jp-tok.ml.cloud.ibm.com"
-DEFAULT_MODEL_ID = "llama-3-3-70b-instruct"
+DEFAULT_MODEL_ID = "meta-llama/llama-4-maverick-17b-128e-instruct-fp8"
 DEFAULT_API_VERSION = "2025-10-25"
 
 
