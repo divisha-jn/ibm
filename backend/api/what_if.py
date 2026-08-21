@@ -187,7 +187,7 @@ def _get_explanation(
         try:
             from backend.ai.explain import explain_conflict
             from backend.ai.granite import GraniteConfigurationError
-            return explain_conflict(evidence_envelope)
+            return explain_conflict(evidence_envelope, request_id=_first_unscheduled_id(intent, new_schedule))
         except Exception as exc:  # noqa: BLE001
             logger.info(
                 "explain_conflict unavailable (%s: %s) — using operation fallback.",
@@ -195,6 +195,15 @@ def _get_explanation(
             )
 
     return _build_explanation_from_ops(intent, new_schedule)
+
+
+def _first_unscheduled_id(intent, new_schedule: dict) -> str | None:
+    """Return the first newly-affected request_id for focused Granite explanation."""
+    for op in intent.operations:
+        if op.request_id:
+            return op.request_id
+    unscheduled = new_schedule.get("unscheduled_requests", [])
+    return unscheduled[0]["request_id"] if unscheduled else None
 
 
 def _build_explanation_from_ops(

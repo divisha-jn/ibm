@@ -36,8 +36,8 @@ class Operation(BaseModel):
                 raise ValueError(
                     "SET_PRIORITY requires request_id and integer value."
                 )
-            if self.value < 0:
-                raise ValueError("Priority cannot be negative.")
+            if not (1 <= self.value <= 10):
+                raise ValueError("Priority must be between 1 and 10.")
 
         elif self.operation == "SET_REQUIRED_DURATION":
             if not self.request_id or self.value is None:
@@ -46,6 +46,8 @@ class Operation(BaseModel):
                 )
             if self.value <= 0:
                 raise ValueError("Required duration must be positive.")
+            if self.value > 86400:
+                raise ValueError("Required duration cannot exceed 86400 seconds (24 hours).")
 
         elif self.operation == "DISABLE_STATION":
             if not self.station_id:

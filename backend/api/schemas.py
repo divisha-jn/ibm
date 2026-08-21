@@ -40,9 +40,23 @@ class ExplainRequest(BaseModel):
     scenario_id: str
     request_id: str
 
+class ConflictRecord(BaseModel):
+    conflicting_request_id: str
+    station_id: str
+    overlap_seconds: int
+    request_priority: int
+    conflicting_request_priority: Optional[int]
+
+class ExplainEvidence(BaseModel):
+    reason_codes: List[str]
+    conflicts: List[ConflictRecord]
+    feasibility: Dict[str, Any]
+    alternative_window_ids: List[str]
+
 class ExplainResponse(BaseModel):
     request_id: str
     explanation: str
+    evidence: Optional[ExplainEvidence] = None  # None when pipeline is down or request was scheduled
 
 # ---------------------------------------------------------------------------
 # Contract #7 — what_if
