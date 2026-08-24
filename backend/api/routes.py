@@ -4,6 +4,8 @@ from fastapi import APIRouter, HTTPException
 from backend.api.schemas import (
     ExplainRequest,
     ExplainResponse,
+    ExplainEvidence,
+    ConflictRecord,
     WhatIfRequest,
     WhatIfResponse,
     ApplyWhatIfRequest,
@@ -97,9 +99,47 @@ def explain_conflict(request: ExplainRequest):
     # Step 3: find the evidence record for this request_id
     explanation = _explain_from_evidence(request.request_id, evidence_envelope)
 
+    # Step 4: extract the structured evidence record for this request (if available)
+    evidence = _extract_evidence(request.request_id, evidence_envelope)
+
     return ExplainResponse(
         request_id=request.request_id,
         explanation=explanation,
+        evidence=evidence,
+    )
+
+
+def _extract_evidence(request_id: str, evidence_envelope: dict | None) -> ExplainEvidence | None:
+    """
+    Pull the structured evidence record for request_id out of the contract #6
+    envelope and return it as an ExplainEvidence model for P5 to render.
+    Returns None when the pipeline is down or the request was scheduled successfully.
+    """
+    if not evidence_envelope:
+        return None
+
+    record = next(
+        (r for r in evidence_envelope.get("evidence", [])
+         if r["request_id"] == request_id),
+        None,
+    )
+    if record is None:
+        return None
+
+    return ExplainEvidence(
+        reason_codes=record.get("reason_codes", []),
+        conflicts=[
+            ConflictRecord(
+                conflicting_request_id=c["conflicting_request_id"],
+                station_id=c["station_id"],
+                overlap_seconds=c["overlap_seconds"],
+                request_priority=c["request_priority"],
+                conflicting_request_priority=c.get("conflicting_request_priority"),
+            )
+            for c in record.get("conflicts", [])
+        ],
+        feasibility=record.get("feasibility", {}),
+        alternative_window_ids=record.get("alternative_window_ids", []),
     )
 
 
@@ -132,7 +172,7 @@ def _explain_from_evidence(request_id: str, evidence_envelope: dict | None) -> s
     # Try real Granite explanation (P3)
     try:
         from backend.ai.explain import explain_conflict as granite_explain
-        return granite_explain(evidence_envelope)
+        return granite_explain(evidence_envelope, request_id=request_id)
     except Exception as exc:  # noqa: BLE001
         logger.info(
             "Granite explain_conflict unavailable (%s) — using factual fallback.", exc

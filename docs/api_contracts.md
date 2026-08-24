@@ -136,18 +136,44 @@ don't rely on it selecting anything yet.
 ```json
 {
   "request_id": "REQ_002",
-  "explanation": "REQ_002 (priority 5) could not be scheduled because it conflicts with REQ_001 (priority 8) at GS_SG_01 with 180s overlap. Reason: ANTENNA_RESOURCE_CONFLICT."
+  "explanation": "REQ_002 (priority 5) could not be scheduled because antenna GS_SG_01_A1 at GS_SG_01 is already occupied by REQ_001 (priority 8) for 240 seconds of the available window.",
+  "evidence": {
+    "reason_codes": ["ANTENNA_RESOURCE_CONFLICT"],
+    "conflicts": [
+      {
+        "conflicting_request_id": "REQ_001",
+        "station_id": "GS_SG_01",
+        "overlap_seconds": 240,
+        "request_priority": 5,
+        "conflicting_request_priority": 8
+      }
+    ],
+    "feasibility": {
+      "requested_contact_seconds": 300
+    },
+    "alternative_window_ids": []
+  }
 }
 ```
-If `request_id` was actually scheduled successfully, or if conflict
-evidence isn't available at all (live pipeline down), `explanation` is
-still a plain string — just a different factual sentence, e.g. `"REQ_002
-was scheduled successfully — no conflict evidence found."` or `"Conflict
-evidence for REQ_002 is not available (live solver pipeline inactive —
-check ortools installation)."`. There is no error status for "couldn't
-generate a real explanation" — you always get `200` with *some* string;
-inspect its content if you need to distinguish a Granite-grounded
-explanation from a fallback one.
+
+**`explanation`** is always a plain string (Granite prose or factual
+fallback) — render it as a paragraph.
+
+**`evidence`** is `null` in two cases:
+- The request was scheduled successfully (no conflict to report)
+- The live solver pipeline is down (ortools unavailable)
+
+When `evidence` is non-null, P5 can use it to:
+- Show a reason badge from `reason_codes[0]` (e.g. `ANTENNA_RESOURCE_CONFLICT`)
+- Render a conflict card from `conflicts[]` — highlight the `conflicting_request_id` block on the Gantt
+- Show `alternative_window_ids` as "Try instead" suggestions if the list is non-empty
+
+If `request_id` was scheduled successfully, or the pipeline is down,
+`explanation` is still a plain string — e.g. `"REQ_002 was scheduled
+successfully — no conflict evidence found."` or `"Conflict evidence for
+REQ_002 is not available (live solver pipeline inactive — check ortools
+installation)."`. You always get `200` with some string; `evidence: null`
+is the signal that there is nothing structured to render.
 
 ### `POST /what-if`
 

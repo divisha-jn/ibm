@@ -9,10 +9,11 @@ from typing import Protocol
 
 
 class VisibilityWindowSource(Protocol):
+    window_id: str
     satellite_id: str
-    station: str
-    visibility_start: str
-    visibility_end: str
+    station_id: str
+    aos: str
+    los: str
     duration_seconds: int
     max_elevation_deg: float
 
@@ -29,17 +30,36 @@ def _iso_utc(value: datetime | str) -> str:
     return parsed.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
-def _window_id(window: VisibilityWindowSource) -> str:
+def _fallback_window_id(window: VisibilityWindowSource) -> str:
     identity = "|".join(
         (
             window.satellite_id,
-            window.station,
-            window.visibility_start,
-            window.visibility_end,
+            window.station_id,
+            window.aos,
+            window.los,
         )
     )
     digest = hashlib.sha256(identity.encode("utf-8")).hexdigest()[:16].upper()
     return f"VW_{digest}"
+
+
+def _window_id(window: VisibilityWindowSource) -> str:
+    missing = object()
+    source_window_id = getattr(window, "window_id", missing)
+
+    if source_window_id is missing:
+        return _fallback_window_id(window)
+
+    if (
+        not isinstance(source_window_id, str)
+        or not source_window_id
+        or source_window_id != source_window_id.strip()
+    ):
+        raise ValueError(
+            f"Visibility window has an invalid window_id: {source_window_id!r}"
+        )
+
+    return source_window_id
 
 
 def adapt_visibility_for_scheduler(
@@ -66,9 +86,9 @@ def adapt_visibility_for_scheduler(
             {
                 "window_id": _window_id(window),
                 "satellite_id": window.satellite_id,
-                "station_id": window.station,
-                "aos": window.visibility_start,
-                "los": window.visibility_end,
+                "station_id": window.station_id,
+                "aos": window.aos,
+                "los": window.los,
                 "duration_seconds": window.duration_seconds,
                 "max_elevation_deg": window.max_elevation_deg,
             }

@@ -4,7 +4,7 @@ skyfield>=1.49
 requests>=2.31
 pytest>=8.0
 fastapi==0.104.1
+httpx>=0.23,<0.25
 uvicorn==0.24.0
 pydantic==2.5.2
 python-dotenv>=1.0,<2
-

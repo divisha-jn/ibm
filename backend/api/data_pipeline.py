@@ -32,7 +32,7 @@ import logging
 import subprocess
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -41,7 +41,20 @@ logger = logging.getLogger(__name__)
 REPO_ROOT = Path(__file__).resolve().parents[2]
 MISSION_REQUESTS_PATH = REPO_ROOT / "data" / "mission_requests.json"
 GENERATED_DIR = REPO_ROOT / "backend" / "data" / "generated"
-VISIBILITY_CACHE_PATH = GENERATED_DIR / "visibility_windows.json"
+# Keep P2's canonical cache separate from P1's frozen display/cache contract.
+VISIBILITY_CACHE_PATH = GENERATED_DIR / "visibility_windows_scheduler.json"
+VISIBILITY_HORIZON_HOURS = 48
+SCHEDULER_WINDOW_FIELDS = frozenset(
+    {
+        "window_id",
+        "satellite_id",
+        "station_id",
+        "aos",
+        "los",
+        "duration_seconds",
+        "max_elevation_deg",
+    }
+)
 
 # 6-hour TTL — matches CelesTrak GP element cache in celestrak.py.
 # Visibility windows are derived from those elements, so there is no
@@ -79,50 +92,118 @@ def _load_mission_requests() -> dict:
 
 
 def _cache_is_fresh() -> bool:
-    """True if visibility_windows.json exists and is younger than the TTL."""
+    """True if the canonical scheduler cache exists and is younger than the TTL."""
     if not VISIBILITY_CACHE_PATH.exists():
         return False
     age = time.time() - VISIBILITY_CACHE_PATH.stat().st_mtime
     return age < VISIBILITY_CACHE_TTL_SECONDS
 
 
+def _visibility_cache_is_compatible(envelope: object) -> bool:
+    """Return whether a cache envelope has P2's current canonical structure."""
+    if not isinstance(envelope, dict):
+        return False
+
+    planning_horizon = envelope.get("planning_horizon")
+    windows = envelope.get("visibility_windows")
+    if (
+        not isinstance(planning_horizon, dict)
+        or set(planning_horizon) != {"start", "end"}
+        or not isinstance(planning_horizon["start"], str)
+        or not isinstance(planning_horizon["end"], str)
+        or not isinstance(envelope.get("minimum_elevation_deg"), (int, float))
+        or not isinstance(windows, list)
+        or not windows
+    ):
+        return False
+
+    return all(
+        isinstance(window, dict)
+        and set(window) == SCHEDULER_WINDOW_FIELDS
+        and isinstance(window["window_id"], str)
+        and bool(window["window_id"])
+        and isinstance(window["satellite_id"], str)
+        and window["satellite_id"].startswith("NORAD_")
+        and isinstance(window["station_id"], str)
+        and bool(window["station_id"])
+        and isinstance(window["aos"], str)
+        and isinstance(window["los"], str)
+        and isinstance(window["duration_seconds"], int)
+        and isinstance(window["max_elevation_deg"], (int, float))
+        for window in windows
+    )
+
+
+def _save_visibility_cache(envelope: dict) -> None:
+    """Atomically persist canonical visibility data for P2."""
+    VISIBILITY_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    temporary_path = VISIBILITY_CACHE_PATH.with_suffix(
+        VISIBILITY_CACHE_PATH.suffix + ".tmp"
+    )
+    with open(temporary_path, "w", encoding="utf-8") as f:
+        json.dump(envelope, f, indent=2)
+    temporary_path.replace(VISIBILITY_CACHE_PATH)
+
+
 def _get_visibility_data() -> dict:
     """
-    Return the contract #3 visibility envelope, regenerating when stale.
+    Return canonical solver-ready visibility data, regenerating when needed.
 
     TTL behaviour:
-      fresh cache   → load from disk immediately
-      stale / empty → generate_all_visibility_windows() + save, then return
+      fresh compatible cache → load from disk immediately
+      stale / incompatible   → generate P1 objects, adapt, cache, then return
     """
-    from backend.data.passes import generate_all_visibility_windows, save_visibility_windows
+    from backend.api.visibility_adapter import adapt_visibility_for_scheduler
+    from backend.data.ground_stations import load_ground_stations
+    from backend.data.passes import generate_all_visibility_windows
 
     if _cache_is_fresh():
-        with open(VISIBILITY_CACHE_PATH, encoding="utf-8") as f:
-            envelope = json.load(f)
-        if envelope.get("visibility_windows"):
+        try:
+            with open(VISIBILITY_CACHE_PATH, encoding="utf-8") as f:
+                envelope = json.load(f)
+        except (OSError, json.JSONDecodeError) as exc:
+            logger.warning("Could not read visibility cache (%s) — regenerating.", exc)
+        else:
+            if _visibility_cache_is_compatible(envelope):
+                logger.info(
+                    "Loaded %d canonical visibility windows from cache (age < %dh).",
+                    len(envelope["visibility_windows"]),
+                    VISIBILITY_CACHE_TTL_SECONDS // 3600,
+                )
+                return envelope
             logger.info(
-                "Loaded %d visibility windows from cache (age < %dh).",
-                len(envelope["visibility_windows"]),
-                VISIBILITY_CACHE_TTL_SECONDS // 3600,
+                "Visibility cache is incompatible with the current scheduler "
+                "contract — regenerating."
             )
-            return envelope
-        logger.warning("Cached visibility_windows.json is empty — regenerating.")
     else:
         if VISIBILITY_CACHE_PATH.exists():
             logger.info("Visibility window cache is stale — regenerating.")
         else:
             logger.info("No visibility window cache found — generating for the first time.")
 
-    logger.info("Generating visibility windows from CelesTrak/Skyfield …")
-    windows = generate_all_visibility_windows()
+    logger.info("Generating and adapting visibility windows from CelesTrak/Skyfield …")
+    # P1 serializes AOS/LOS at whole-second precision; keep P2's horizon on
+    # that same boundary so integer solver offsets reconstruct exact times.
+    planning_start = datetime.now(timezone.utc).replace(microsecond=0)
+    planning_end = planning_start + timedelta(hours=VISIBILITY_HORIZON_HOURS)
+    windows = generate_all_visibility_windows(
+        horizon_hours=VISIBILITY_HORIZON_HOURS
+    )
     if not windows:
         raise RuntimeError("generate_all_visibility_windows() returned no windows.")
 
-    now = datetime.now(timezone.utc)
-    save_visibility_windows(windows, start=now)
+    stations = load_ground_stations()
+    visibility_data = adapt_visibility_for_scheduler(
+        windows,
+        planning_start=planning_start,
+        planning_end=planning_end,
+        minimum_elevation_deg=min(
+            station.min_elevation_deg for station in stations
+        ),
+    )
+    _save_visibility_cache(visibility_data)
 
-    with open(VISIBILITY_CACHE_PATH, encoding="utf-8") as f:
-        return json.load(f)
+    return visibility_data
 
 
 def _backfill_contract_fields(schedule_result: dict) -> dict:
@@ -137,6 +218,35 @@ def _backfill_contract_fields(schedule_result: dict) -> dict:
     for req in schedule_result.get("unscheduled_requests", []):
         if "reason_codes" not in req:
             req["reason_codes"] = ["UNSCHEDULED"]
+
+    return schedule_result
+
+
+def _enrich_unscheduled_reason_codes(
+    schedule_result: dict,
+    conflict_evidence: dict,
+) -> dict:
+    """Attach P2 reason codes to matching unscheduled schedule records."""
+    evidence_by_request_id = {
+        record["request_id"]: record
+        for record in conflict_evidence.get("evidence", [])
+    }
+
+    for unscheduled in schedule_result.get("unscheduled_requests", []):
+        request_id = unscheduled["request_id"]
+        evidence = evidence_by_request_id.get(request_id)
+        if evidence is None:
+            raise ValueError(
+                f"Conflict evidence missing for unscheduled request {request_id}."
+            )
+
+        reason_codes = evidence.get("reason_codes")
+        if not isinstance(reason_codes, list) or not reason_codes:
+            raise ValueError(
+                f"Conflict evidence has no reason codes for {request_id}."
+            )
+
+        unscheduled["reason_codes"] = list(reason_codes)
 
     return schedule_result
 
@@ -160,10 +270,17 @@ def build_live_schedule() -> Optional[dict]:
         return None
 
     try:
+        from backend.solver.conflicts import build_conflict_evidence
         from backend.solver.scheduler import solve_schedule
         mission_data = _load_mission_requests()
         visibility_data = _get_visibility_data()
         result = solve_schedule(visibility_data, mission_data)
+        evidence = build_conflict_evidence(
+            visibility_data,
+            mission_data,
+            result,
+        )
+        _enrich_unscheduled_reason_codes(result, evidence)
         return _backfill_contract_fields(result)
     except Exception as exc:  # noqa: BLE001
         logger.error("build_live_schedule failed: %s", exc, exc_info=True)

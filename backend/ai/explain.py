@@ -13,12 +13,20 @@ if TYPE_CHECKING:
 def explain_conflict(
     evidence: dict[str, Any],
     *,
+    request_id: str | None = None,
     client: GraniteClient | None = None,
 ) -> str:
     """Generate a grounded explanation from P2 conflict evidence.
 
     Granite is not allowed to create the evidence. The evidence passed here
     must come from the deterministic solver/conflict engine.
+
+    Args:
+        evidence:   Contract #6 envelope — { "scenario_id": ..., "evidence": [...] }.
+        request_id: When supplied, only the matching record is sent to Granite.
+                    Without this, Granite receives all unscheduled records at once,
+                    which produces less focused explanations.
+        client:     Optional pre-built GraniteClient (useful in tests).
     """
     if not isinstance(evidence, dict):
         raise TypeError("evidence must be a dictionary")
@@ -26,13 +34,23 @@ def explain_conflict(
     if not evidence.get("evidence"):
         raise ValueError("No conflict evidence was supplied.")
 
+    # Narrow the envelope to just the one record being asked about so Granite
+    # doesn't have to guess which request to explain.
+    if request_id is not None:
+        matching = [
+            r for r in evidence["evidence"]
+            if r.get("request_id") == request_id
+        ]
+        if not matching:
+            raise ValueError(f"No evidence record found for request_id={request_id!r}.")
+        evidence = {"scenario_id": evidence.get("scenario_id"), "evidence": matching}
+
     if client is None:
         from .granite import GraniteClient
 
         client = GraniteClient()
 
-    granite = client
-    return granite.chat(
+    return client.chat(
         build_explain_messages(evidence),
         max_completion_tokens=300,
         temperature=0.0,
