@@ -302,7 +302,10 @@ def process_what_if_query(request: WhatIfRequest) -> WhatIfResponse:
         # 7. Build conflict evidence for the explanation  (P2)
         evidence_envelope = None
         if using_live:
-            evidence_envelope = build_live_conflict_evidence(new_schedule)
+            evidence_envelope = build_live_conflict_evidence(
+                new_schedule,
+                mission_data=temp_scenario,
+            )
 
         # 8. Natural-language explanation  (P3, with op-based fallback)
         explanation = _get_explanation(intent, new_schedule, evidence_envelope)
