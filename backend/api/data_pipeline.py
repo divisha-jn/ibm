@@ -222,6 +222,35 @@ def _backfill_contract_fields(schedule_result: dict) -> dict:
     return schedule_result
 
 
+def _enrich_unscheduled_reason_codes(
+    schedule_result: dict,
+    conflict_evidence: dict,
+) -> dict:
+    """Attach P2 reason codes to matching unscheduled schedule records."""
+    evidence_by_request_id = {
+        record["request_id"]: record
+        for record in conflict_evidence.get("evidence", [])
+    }
+
+    for unscheduled in schedule_result.get("unscheduled_requests", []):
+        request_id = unscheduled["request_id"]
+        evidence = evidence_by_request_id.get(request_id)
+        if evidence is None:
+            raise ValueError(
+                f"Conflict evidence missing for unscheduled request {request_id}."
+            )
+
+        reason_codes = evidence.get("reason_codes")
+        if not isinstance(reason_codes, list) or not reason_codes:
+            raise ValueError(
+                f"Conflict evidence has no reason codes for {request_id}."
+            )
+
+        unscheduled["reason_codes"] = list(reason_codes)
+
+    return schedule_result
+
+
 # ---------------------------------------------------------------------------
 # Public entry points
 # ---------------------------------------------------------------------------
@@ -241,10 +270,17 @@ def build_live_schedule() -> Optional[dict]:
         return None
 
     try:
+        from backend.solver.conflicts import build_conflict_evidence
         from backend.solver.scheduler import solve_schedule
         mission_data = _load_mission_requests()
         visibility_data = _get_visibility_data()
         result = solve_schedule(visibility_data, mission_data)
+        evidence = build_conflict_evidence(
+            visibility_data,
+            mission_data,
+            result,
+        )
+        _enrich_unscheduled_reason_codes(result, evidence)
         return _backfill_contract_fields(result)
     except Exception as exc:  # noqa: BLE001
         logger.error("build_live_schedule failed: %s", exc, exc_info=True)

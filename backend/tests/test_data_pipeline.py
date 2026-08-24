@@ -2,10 +2,12 @@ import json
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from backend.api import data_pipeline
+from backend.api import data_pipeline, routes
 from backend.api.routes import get_schedule
+from backend.api.schemas import ScheduleResult
 from backend.data import ground_stations, passes
 from backend.data.passes import VisibilityWindow
+from backend.solver.conflicts import build_conflict_evidence
 from backend.solver.scheduler import solve_schedule
 
 
@@ -39,6 +41,58 @@ def _configure_live_visibility(monkeypatch, tmp_path):
         "load_ground_stations",
         lambda: [SimpleNamespace(min_elevation_deg=10.0)],
     )
+
+
+def _station_conflict_inputs():
+    visibility_data = {
+        "planning_horizon": {
+            "start": "2026-08-24T00:00:00Z",
+            "end": "2026-08-25T00:00:00Z",
+        },
+        "minimum_elevation_deg": 10.0,
+        "visibility_windows": [
+            {
+                "window_id": "VW_HIGH_PRIORITY",
+                "satellite_id": "NORAD_25544",
+                "station_id": "GS_SG_01",
+                "aos": "2026-08-24T10:00:00Z",
+                "los": "2026-08-24T10:15:00Z",
+                "duration_seconds": 900,
+                "max_elevation_deg": 40.0,
+            },
+            {
+                "window_id": "VW_LOW_PRIORITY",
+                "satellite_id": "NORAD_48274",
+                "station_id": "GS_SG_01",
+                "aos": "2026-08-24T10:00:00Z",
+                "los": "2026-08-24T10:15:00Z",
+                "duration_seconds": 900,
+                "max_elevation_deg": 35.0,
+            },
+        ],
+    }
+    mission_data = {
+        "scenario_id": "LIVE_CONFLICT_ENRICHMENT",
+        "requests": [
+            {
+                "request_id": "REQ_HIGH_PRIORITY",
+                "satellite_id": "NORAD_25544",
+                "required_contact_seconds": 900,
+                "priority": 9,
+                "eligible_station_ids": ["GS_SG_01"],
+                "mandatory": False,
+            },
+            {
+                "request_id": "REQ_LOW_PRIORITY",
+                "satellite_id": "NORAD_48274",
+                "required_contact_seconds": 900,
+                "priority": 5,
+                "eligible_station_ids": ["GS_SG_01"],
+                "mandatory": False,
+            },
+        ],
+    }
+    return visibility_data, mission_data
 
 
 def test_incompatible_legacy_cache_is_regenerated_as_canonical(monkeypatch, tmp_path):
@@ -158,3 +212,86 @@ def test_schedule_route_reaches_real_solver_with_adapted_p1_windows(
             "priority": 9,
         }
     ]
+
+
+def test_schedule_enriches_station_conflict_from_same_p2_inputs(monkeypatch):
+    visibility_data, mission_data = _station_conflict_inputs()
+    captured = {}
+
+    monkeypatch.setattr(data_pipeline, "_ortools_available", lambda: True)
+    monkeypatch.setattr(
+        data_pipeline, "_get_visibility_data", lambda: visibility_data
+    )
+    monkeypatch.setattr(
+        data_pipeline, "_load_mission_requests", lambda: mission_data
+    )
+
+    def capture_evidence(supplied_visibility, supplied_missions, schedule_result):
+        captured["visibility_data"] = supplied_visibility
+        captured["mission_data"] = supplied_missions
+        captured["schedule_result"] = schedule_result
+        captured["evidence"] = build_conflict_evidence(
+            supplied_visibility,
+            supplied_missions,
+            schedule_result,
+        )
+        return captured["evidence"]
+
+    with patch(
+        "backend.solver.scheduler.solve_schedule", wraps=solve_schedule
+    ) as real_solver, patch(
+        "backend.solver.conflicts.build_conflict_evidence",
+        side_effect=capture_evidence,
+    ) as real_evidence:
+        result = get_schedule()
+
+    real_solver.assert_called_once_with(visibility_data, mission_data)
+    real_evidence.assert_called_once()
+    assert captured["visibility_data"] is visibility_data
+    assert captured["mission_data"] is mission_data
+    assert captured["schedule_result"] is result
+
+    public_result = ScheduleResult.model_validate(result).model_dump()
+    assert public_result["unscheduled_requests"] == [
+        {
+            "request_id": "REQ_LOW_PRIORITY",
+            "satellite_id": "NORAD_48274",
+            "reason_codes": ["ANTENNA_RESOURCE_CONFLICT"],
+        }
+    ]
+    assert public_result["unscheduled_requests"][0]["reason_codes"] != [
+        "UNSCHEDULED"
+    ]
+
+    evidence_record = captured["evidence"]["evidence"][0]
+    assert evidence_record["request_id"] == "REQ_LOW_PRIORITY"
+    assert evidence_record["conflicts"][0]["conflicting_request_id"] == (
+        "REQ_HIGH_PRIORITY"
+    )
+    assert evidence_record["conflicts"][0]["station_id"] == "GS_SG_01"
+    assert evidence_record["conflicts"][0]["overlap_seconds"] == 900
+    assert evidence_record["conflicts"][0]["request_priority"] == 5
+    assert evidence_record["conflicts"][0]["conflicting_request_priority"] == 9
+
+
+def test_missing_p2_evidence_does_not_return_generic_live_result(monkeypatch):
+    visibility_data, mission_data = _station_conflict_inputs()
+    monkeypatch.setattr(data_pipeline, "_ortools_available", lambda: True)
+    monkeypatch.setattr(
+        data_pipeline, "_get_visibility_data", lambda: visibility_data
+    )
+    monkeypatch.setattr(
+        data_pipeline, "_load_mission_requests", lambda: mission_data
+    )
+
+    with patch(
+        "backend.solver.conflicts.build_conflict_evidence",
+        return_value={
+            "scenario_id": mission_data["scenario_id"],
+            "evidence": [],
+        },
+    ):
+        assert data_pipeline.build_live_schedule() is None
+
+    monkeypatch.setattr(routes, "build_live_schedule", lambda: None)
+    assert get_schedule() is routes._STUB_SCHEDULE
