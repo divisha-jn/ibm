@@ -1,0 +1,86 @@
+{
+  "scenario_id": "DEMO_001",
+  "request_id": "REQ_002",
+  "satellite_id": "NORAD_48274",
+  "schedule_status": "SCHEDULED",
+  "assessment_status": "ASSESSED",
+  "contact": {
+    "station_id": "GS_SG_01",
+    "window_id": "VW_0012",
+    "scheduled_start": "2026-08-25T10:00:00Z",
+    "scheduled_end": "2026-08-25T10:05:00Z"
+  },
+  "risk_score": 40,
+  "risk_level": "MEDIUM",
+  "reason_codes": [
+    "SINGLE_FEASIBLE_WINDOW",
+    "SINGLE_USABLE_STATION"
+  ],
+  "factors": {
+    "scheduling_flexibility": {
+      "weight": 20,
+      "factor_score": 1.0,
+      "points": 20,
+      "metrics": {
+        "duration_feasible_window_count": 1,
+        "total_feasible_visibility_seconds": 600,
+        "total_start_slack_seconds": 300
+      }
+    },
+    "station_redundancy": {
+      "weight": 15,
+      "factor_score": 1.0,
+      "points": 15,
+      "metrics": {
+        "usable_station_count": 1,
+        "usable_station_ids": [
+          "GS_SG_01"
+        ]
+      }
+    },
+    "conflict_pressure": {
+      "weight": 25,
+      "factor_score": 0.0,
+      "points": 0,
+      "metrics": {
+        "blocked_window_count": 0,
+        "duration_feasible_window_count": 1,
+        "blocked_window_fraction": 0.0,
+        "blocked_window_ids": [],
+        "conflicting_request_ids": []
+      }
+    },
+    "recovery": {
+      "weight": 20,
+      "state": "NOT_APPLICABLE_SCHEDULED",
+      "factor_score": 0.0,
+      "points": 0,
+      "best_alternative": null
+    },
+    "mission_priority": {
+      "weight": 10,
+      "factor_score": 0.5,
+      "points": 5,
+      "metrics": {
+        "priority": 5,
+        "approved_scale_min": 1,
+        "approved_scale_max": 10,
+        "meaning": "OPERATIONAL_CONSEQUENCE",
+        "mandatory_included": false
+      }
+    },
+    "space_weather": {
+      "weight": 10,
+      "status": "COMPLETE",
+      "state": "CLEAR",
+      "factor_score": 0.0,
+      "points": 0,
+      "matched_events": [],
+      "context_events": []
+    }
+  },
+  "data_quality": {
+    "overall": "COMPLETE",
+    "space_weather": "COMPLETE"
+  }
+}
