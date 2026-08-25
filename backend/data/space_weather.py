@@ -18,7 +18,7 @@ shared across everyone using it — use a real key for the actual demo.
 Usage:
     from backend.data.space_weather import fetch_space_weather_events
 
-    events = fetch_space_weather_events("2026-08-20", "2026-08-27")
+    result = fetch_space_weather_events("2026-08-20", "2026-08-27")
 """
 
 from __future__ import annotations
@@ -40,7 +40,7 @@ CACHE_MAX_AGE_SECONDS = 6 * 60 * 60  # 6 hours — advisories don't need to be f
 
 # Reads from environment variable NASA_API_KEY if set (see .env.example),
 # falls back to NASA's public rate-limited demo key.
-NASA_API_KEY = os.environ.get("NASA_API_KEY", "DEMO_KEY") 
+NASA_API_KEY = os.environ.get("NASA_API_KEY", "DEMO_KEY")
 
 EventType = Literal["FLR", "GST"]
 
@@ -107,19 +107,32 @@ def _normalize_flare(raw: dict) -> dict:
 def _normalize_geomagnetic_storm(raw: dict) -> dict:
     """Convert a raw DONKI GST record into our shared advisory shape."""
     kp_values = raw.get("allKpIndex", [])
+    # Keep every individual Kp reading with its own timestamp, not just the max —
+    # P2 needs to know WHEN the peak actually happened relative to a scheduled contact.
+    kp_readings = [
+        {"time": k.get("observedTime"), "kp_index": k.get("kpIndex")}
+        for k in kp_values
+    ]
     max_kp = max((k.get("kpIndex", 0) for k in kp_values), default=None)
+    max_kp_time = None
+    if kp_readings:
+        peak_reading = max(kp_readings, key=lambda r: (r["kp_index"] if r["kp_index"] is not None else -1))
+        max_kp_time = peak_reading["time"]
+
     return {
         "event_type": "geomagnetic_storm",
         "event_id": raw.get("gstID"),
         "start_time": raw.get("startTime"),
         "max_kp_index": max_kp,  # Kp scale 0-9, 5+ is considered a storm
+        "max_kp_time": max_kp_time,  # when the peak actually occurred
+        "kp_readings": kp_readings,  # full timeline of every reading, in case P2 needs more than just the peak
         "advisory": f"Geomagnetic storm (max Kp {max_kp}) — possible satellite tracking/comms disruption",
     }
 
 
 def fetch_space_weather_events(
     start_date: str, end_date: str, force_refresh: bool = False
-) -> List[dict]:
+) -> dict:
     """Fetch and normalize all space-weather advisory events (flares + storms)
     for a date range, in a shared shape ready for risk.py to consume.
 
@@ -129,31 +142,47 @@ def fetch_space_weather_events(
         force_refresh: bypass the 6-hour cache and re-fetch from NASA
 
     Returns:
-        List of normalized advisory dicts, sorted by start_time.
+        {
+            "events": [...],               # normalized advisory dicts, sorted by start_time
+            "fetch_status": {
+                "FLR": "ok" | "failed",     # "ok" = NASA responded, even if it returned zero events
+                "GST": "ok" | "failed",     # "failed" = the request itself didn't succeed
+            }
+        }
+
+        IMPORTANT for P2: an empty events list only means clear weather if
+        fetch_status says "ok" for that type. If fetch_status says "failed",
+        treat it as unknown risk, not confirmed-clear — don't schedule as if
+        it's safe just because the list is empty.
     """
     events: List[dict] = []
+    fetch_status = {"FLR": "ok", "GST": "ok"}
 
     try:
         flares = _fetch_donki_events("FLR", start_date, end_date, force_refresh)
         events.extend(_normalize_flare(f) for f in flares)
     except SpaceWeatherError as exc:
-        print(f"[space_weather] WARNING: skipping solar flare data: {exc}")
+        print(f"[space_weather] WARNING: FLR fetch failed: {exc}")
+        fetch_status["FLR"] = "failed"
 
     try:
         storms = _fetch_donki_events("GST", start_date, end_date, force_refresh)
         events.extend(_normalize_geomagnetic_storm(s) for s in storms)
     except SpaceWeatherError as exc:
-        print(f"[space_weather] WARNING: skipping geomagnetic storm data: {exc}")
+        print(f"[space_weather] WARNING: GST fetch failed: {exc}")
+        fetch_status["GST"] = "failed"
 
     events.sort(key=lambda e: e.get("start_time") or "")
-    return events
+    return {"events": events, "fetch_status": fetch_status}
 
 
 if __name__ == "__main__":
     from datetime import datetime, timedelta, timezone
+
     end = datetime.now(timezone.utc).date()
     start = end - timedelta(days=7)
     print(f"Fetching space-weather advisories from {start} to {end}...")
-    events = fetch_space_weather_events(str(start), str(end))
-    print(f"Found {len(events)} advisory event(s):")
-    print(json.dumps(events, indent=2))
+    result = fetch_space_weather_events(str(start), str(end))
+    print(f"Fetch status: {result['fetch_status']}")
+    print(f"Found {len(result['events'])} advisory event(s):")
+    print(json.dumps(result["events"], indent=2))
