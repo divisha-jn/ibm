@@ -39,6 +39,7 @@ class ScheduleResult(BaseModel):
 class ExplainRequest(BaseModel):
     scenario_id: str
     request_id: str
+    user_question: Optional[str] = None  # free-text question to focus Granite's answer
 
 class ConflictRecord(BaseModel):
     conflicting_request_id: str

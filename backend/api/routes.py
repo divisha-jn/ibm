@@ -78,28 +78,38 @@ def get_schedule():
 @router.post("/explain", response_model=ExplainResponse)
 def explain_conflict(request: ExplainRequest):
     """
-    Returns a natural-language explanation for why a request was unscheduled.
+    Returns a natural-language explanation for a scheduling decision.
 
-    Flow (contract #6 → Granite → contract #3 response):
-        1. Fetch the current baseline schedule via build_live_schedule().
-        2. Run build_conflict_evidence() on that schedule to get grounded
-           evidence for the requested request_id.
-        3. Pass evidence to backend/ai/explain.py explain_conflict() which
-           calls Granite (P3).  Falls back to a factual stub string when
-           Granite credentials are absent or ortools is unavailable.
+    Works for both scheduled and unscheduled requests:
+    - Unscheduled: passes conflict evidence to Granite to explain why it failed.
+    - Scheduled:   passes the contact record to Granite to explain the decision.
+
+    Falls back to a factual stub string when Granite or ortools is unavailable.
     """
-    # Step 1: get the live schedule (needed to build evidence)
+    # Step 1: get the live schedule
     schedule = build_live_schedule()
 
-    # Step 2: build conflict evidence from the real schedule
+    # Step 2: build conflict evidence (only populated for unscheduled requests)
     evidence_envelope = None
     if schedule is not None:
         evidence_envelope = build_live_conflict_evidence(schedule)
 
-    # Step 3: find the evidence record for this request_id
-    explanation = _explain_from_evidence(request.request_id, evidence_envelope)
+    # Step 3: check whether this request was scheduled or unscheduled
+    scheduled_contact = None
+    if schedule is not None:
+        scheduled_contact = next(
+            (c for c in schedule.get("scheduled_contacts", [])
+             if c["request_id"] == request.request_id),
+            None,
+        )
 
-    # Step 4: extract the structured evidence record for this request (if available)
+    # Step 4: produce the explanation
+    explanation = _explain_from_evidence(
+        request.request_id, evidence_envelope, scheduled_contact,
+        user_question=request.user_question,
+    )
+
+    # Step 5: extract structured evidence (only for unscheduled)
     evidence = _extract_evidence(request.request_id, evidence_envelope)
 
     return ExplainResponse(
@@ -143,21 +153,57 @@ def _extract_evidence(request_id: str, evidence_envelope: dict | None) -> Explai
     )
 
 
-def _explain_from_evidence(request_id: str, evidence_envelope: dict | None) -> str:
+def _explain_from_evidence(
+    request_id: str,
+    evidence_envelope: dict | None,
+    scheduled_contact: dict | None,
+    *,
+    user_question: str | None = None,
+) -> str:
     """
-    Extract the explanation for request_id from a contract #6 evidence envelope.
+    Produce a Granite explanation for a scheduling decision.
 
-    When Granite credentials are available, calls backend/ai/explain.py.
-    Falls back to a factual string built from the solver evidence when
-    Granite is not configured (common during development).
+    - If the request is scheduled: explain what the scheduler decided and why.
+    - If the request is unscheduled: explain why it failed using conflict evidence.
+    - Falls back to a factual string when Granite or the pipeline is unavailable.
     """
+    # --- Scheduled request: explain the positive decision ---
+    if scheduled_contact is not None:
+        scheduled_evidence = {
+            "request_id": request_id,
+            "status": "SCHEDULED",
+            "station_id": scheduled_contact.get("station_id"),
+            "antenna_id": scheduled_contact.get("antenna_id"),
+            "scheduled_start": scheduled_contact.get("scheduled_start"),
+            "scheduled_end": scheduled_contact.get("scheduled_end"),
+            "duration_seconds": scheduled_contact.get("duration_seconds"),
+            "priority": scheduled_contact.get("priority"),
+        }
+        try:
+            from backend.ai.explain import explain_conflict as granite_explain
+            return granite_explain(
+                {"scenario_id": evidence_envelope.get("scenario_id") if evidence_envelope else None,
+                 "evidence": [scheduled_evidence]},
+                request_id=request_id,
+                user_question=user_question,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.info("Granite explain unavailable for scheduled request (%s) — using factual fallback.", exc)
+        return (
+            f"{request_id} (priority {scheduled_contact.get('priority')}) was scheduled at "
+            f"{scheduled_contact.get('station_id')} from {scheduled_contact.get('scheduled_start')} "
+            f"to {scheduled_contact.get('scheduled_end')} "
+            f"({scheduled_contact.get('duration_seconds')}s)."
+        )
+
+    # --- Pipeline unavailable ---
     if not evidence_envelope:
         return (
-            f"Conflict evidence for {request_id} is not available "
+            f"Explanation for {request_id} is not available "
             "(live solver pipeline inactive — check ortools installation)."
         )
 
-    # Find the evidence record for this request
+    # --- Unscheduled request: explain the failure ---
     record = next(
         (r for r in evidence_envelope.get("evidence", [])
          if r["request_id"] == request_id),
@@ -165,20 +211,16 @@ def _explain_from_evidence(request_id: str, evidence_envelope: dict | None) -> s
     )
 
     if record is None:
-        return (
-            f"{request_id} was scheduled successfully — no conflict evidence found."
-        )
+        return f"No scheduling record found for {request_id}."
 
-    # Try real Granite explanation (P3)
+    # Try Granite explanation
     try:
         from backend.ai.explain import explain_conflict as granite_explain
-        return granite_explain(evidence_envelope, request_id=request_id)
+        return granite_explain(evidence_envelope, request_id=request_id, user_question=user_question)
     except Exception as exc:  # noqa: BLE001
-        logger.info(
-            "Granite explain_conflict unavailable (%s) — using factual fallback.", exc
-        )
+        logger.info("Granite explain_conflict unavailable (%s) — using factual fallback.", exc)
 
-    # Factual fallback built from solver evidence
+    # Factual fallback
     reason_codes = record.get("reason_codes", [])
     conflicts = record.get("conflicts", [])
 
