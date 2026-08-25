@@ -154,6 +154,15 @@ def test_live_p1_p2_p4_schedule_endpoint(monkeypatch, tmp_path):
             "request_id": low_request_id,
             "satellite_id": "NORAD_90002",
             "reason_codes": ["ANTENNA_RESOURCE_CONFLICT"],
+            "conflicts": [
+                {
+                    "conflicting_request_id": high_request_id,
+                    "station_id": station_id,
+                    "overlap_seconds": 900,
+                    "request_priority": 5,
+                    "conflicting_request_priority": 9,
+                }
+            ],
         }
     ]
     assert payload["unscheduled_requests"][0]["reason_codes"] != ["UNSCHEDULED"]

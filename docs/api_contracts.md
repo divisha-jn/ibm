@@ -193,6 +193,70 @@ REQ_002 is not available (live solver pipeline inactive — check ortools
 installation)."`. You always get `200` with some string; `evidence: null`
 is the signal that there is nothing structured to render.
 
+### `POST /alternatives`
+
+Ranked alternative resolutions for one unscheduled request — **real
+solver re-solves against candidate windows**, not an LLM suggestion.
+Ranked by operational disruption: fewest, then lowest-priority,
+displaced/rescheduled requests first.
+
+**Request** — `AlternativesRequest`:
+```json
+{
+  "scenario_id": "DEMO_001",
+  "request_id": "REQ_002",
+  "limit": 3
+}
+```
+`limit` is optional, defaults to `3` — the max number of ranked
+alternatives to return.
+
+**Response `200`** — `AlternativesResponse`:
+```json
+{
+  "scenario_id": "DEMO_001",
+  "request_id": "REQ_002",
+  "satellite_id": "NORAD_48274",
+  "status": "ALTERNATIVES_FOUND",
+  "reason_codes": ["ANTENNA_RESOURCE_CONFLICT"],
+  "alternatives": [
+    {
+      "rank": 1,
+      "alternative_type": "ALTERNATIVE_WINDOW",
+      "window_id": "VW_0042",
+      "station_id": "GS_PERTH_01",
+      "scheduled_start": "2026-08-27T08:10:00Z",
+      "scheduled_end": "2026-08-27T08:15:00Z",
+      "duration_seconds": 300,
+      "displaced_request_ids": [],
+      "rescheduled_request_ids": [],
+      "ranking_metrics": {
+        "displaced_count": 0,
+        "displaced_priority_total": 0,
+        "rescheduled_count": 0,
+        "rescheduled_priority_total": 0
+      }
+    }
+  ]
+}
+```
+
+`status` is one of:
+- `ALTERNATIVES_FOUND` — `alternatives[]` has 1–`limit` real, solver-validated candidate windows, best first (see `ranking_metrics` below)
+- `NO_FEASIBLE_ALTERNATIVES` — request is genuinely unschedulable anywhere in the horizon; `alternatives` is `[]`, `reason_codes` explains why
+- `REQUEST_ALREADY_SCHEDULED` — `request_id` isn't actually unscheduled; `alternatives` and `reason_codes` are both `[]`
+- `PIPELINE_UNAVAILABLE` — app-level status (not from the solver itself): `ortools` is down, `request_id` doesn't exist in the scenario, or any solver step failed. Same fail-inward-with-`200` convention as `/schedule` and `/explain` — check `status`, not the HTTP status code. `satellite_id` is `null` in this case (it's only known once the request is validated against mission data).
+
+Each entry in `alternatives[]` is a **real, re-solved** candidate — the
+solver was forced to place `request_id` on that exact window and actually
+succeeded, so `scheduled_start`/`scheduled_end`/`duration_seconds` are
+guaranteed feasible, not just "the window exists." `ranking_metrics` is
+what determines sort order: fewer `displaced_count` wins, ties broken by
+lower `displaced_priority_total`, then `rescheduled_count`, then
+`rescheduled_priority_total`. `displaced_request_ids` are requests that
+would lose their contact entirely; `rescheduled_request_ids` keep a
+contact but at a different time/station.
+
 ### `POST /what-if`
 
 Parses a natural-language what-if query, re-solves, and returns the

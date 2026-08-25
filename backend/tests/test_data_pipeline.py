@@ -257,6 +257,15 @@ def test_schedule_enriches_station_conflict_from_same_p2_inputs(monkeypatch):
             "request_id": "REQ_LOW_PRIORITY",
             "satellite_id": "NORAD_48274",
             "reason_codes": ["ANTENNA_RESOURCE_CONFLICT"],
+            "conflicts": [
+                {
+                    "conflicting_request_id": "REQ_HIGH_PRIORITY",
+                    "station_id": "GS_SG_01",
+                    "overlap_seconds": 900,
+                    "request_priority": 5,
+                    "conflicting_request_priority": 9,
+                }
+            ],
         }
     ]
     assert public_result["unscheduled_requests"][0]["reason_codes"] != [

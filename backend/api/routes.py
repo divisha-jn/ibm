@@ -10,6 +10,8 @@ from backend.api.schemas import (
     WhatIfResponse,
     ApplyWhatIfRequest,
     ApplyWhatIfResponse,
+    AlternativesRequest,
+    AlternativesResponse,
     ScheduleResult,
 )
 from backend.api.what_if import (
@@ -17,7 +19,11 @@ from backend.api.what_if import (
     apply_what_if,
     WhatIfNotApplicableError,
 )
-from backend.api.data_pipeline import build_live_schedule, build_live_conflict_evidence
+from backend.api.data_pipeline import (
+    build_live_schedule,
+    build_live_conflict_evidence,
+    build_live_alternatives,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -197,6 +203,38 @@ def _explain_from_evidence(request_id: str, evidence_envelope: dict | None) -> s
         f"Reason: {', '.join(reason_codes)}."
     )
 
+
+
+@router.post("/alternatives", response_model=AlternativesResponse)
+def get_alternatives(request: AlternativesRequest):
+    """
+    Returns solver-validated ranked alternative resolutions for one
+    unscheduled request — real re-solves against candidate windows, ranked
+    by operational disruption (fewest and lowest-priority displaced/
+    rescheduled requests first). Not an LLM suggestion.
+
+    Falls back to a PIPELINE_UNAVAILABLE status (still HTTP 200, matching
+    /schedule and /explain's fail-inward convention) when ortools is
+    unavailable, request_id is unknown, or any solver step fails — check
+    `status` rather than the HTTP status code.
+    """
+    schedule = build_live_schedule()
+    evidence = build_live_conflict_evidence(schedule) if schedule is not None else None
+    result = (
+        build_live_alternatives(
+            schedule, evidence, request.request_id, limit=request.limit
+        )
+        if schedule is not None and evidence is not None
+        else None
+    )
+
+    if result is None:
+        return AlternativesResponse(
+            scenario_id=request.scenario_id,
+            request_id=request.request_id,
+            status="PIPELINE_UNAVAILABLE",
+        )
+    return result
 
 
 @router.post("/what-if", response_model=WhatIfResponse)

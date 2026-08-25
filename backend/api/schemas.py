@@ -126,3 +126,43 @@ class ApplyWhatIfResponse(BaseModel):
     what_if_id: str
     scenario_id: str
     schedule: Dict[str, Any]  # full contract #5 shape — the newly-committed baseline
+
+# ---------------------------------------------------------------------------
+# Ranked alternatives — real, solver-validated alternative windows for one
+# unscheduled request (P2's rank_alternatives(), not an LLM suggestion).
+# ---------------------------------------------------------------------------
+
+class AlternativesRequest(BaseModel):
+    scenario_id: str
+    request_id: str
+    limit: int = 3
+
+class RankingMetrics(BaseModel):
+    displaced_count: int
+    displaced_priority_total: int
+    rescheduled_count: int
+    rescheduled_priority_total: int
+
+class AlternativeWindow(BaseModel):
+    rank: int
+    alternative_type: str
+    window_id: str
+    station_id: str
+    scheduled_start: str
+    scheduled_end: str
+    duration_seconds: int
+    displaced_request_ids: List[str]
+    rescheduled_request_ids: List[str]
+    ranking_metrics: RankingMetrics
+
+class AlternativesResponse(BaseModel):
+    scenario_id: str
+    request_id: str
+    satellite_id: Optional[str] = None
+    # ALTERNATIVES_FOUND | NO_FEASIBLE_ALTERNATIVES | REQUEST_ALREADY_SCHEDULED
+    # | PIPELINE_UNAVAILABLE (P4 app-level status — ortools down, unknown
+    # request_id, or any other solver-side failure; matches /schedule and
+    # /explain's fail-inward-with-200 convention rather than a 5xx)
+    status: str
+    reason_codes: List[str] = []
+    alternatives: List[AlternativeWindow] = []

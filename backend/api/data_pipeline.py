@@ -9,6 +9,7 @@ conflict evidence:
     P2: build_conflict_evidence()          →  evidence dict          (contract #6)
     P4: build_live_schedule()              →  called from GET /schedule
     P4: build_live_conflict_evidence()     →  called from POST /explain
+    P4: build_live_alternatives()          →  called from POST /alternatives
     P4: build_live_what_if_schedule()      →  called from POST /what-if
 
 Design goals
@@ -324,6 +325,47 @@ def build_live_conflict_evidence(
         return build_conflict_evidence(visibility_data, mission_data, schedule_result)
     except Exception as exc:  # noqa: BLE001
         logger.error("build_live_conflict_evidence failed: %s", exc, exc_info=True)
+        return None
+
+
+def build_live_alternatives(
+    schedule_result: dict,
+    conflict_evidence: dict,
+    request_id: str,
+    *,
+    visibility_data: Optional[dict] = None,
+    mission_data: Optional[dict] = None,
+    limit: int = 3,
+) -> Optional[dict]:
+    """
+    Run P2's rank_alternatives() to find solver-validated alternative
+    windows for one unscheduled request, ranked by operational disruption
+    (real re-solves against candidate windows — not an LLM suggestion).
+
+    Returns a dict shaped like rank_alternatives()'s output, or None on any
+    failure — unknown request_id, malformed inputs, and solver errors all
+    collapse to None here, matching every other build_live_* function's
+    fail-inward style. The caller serves a PIPELINE_UNAVAILABLE fallback.
+    """
+    if not _ortools_available():
+        return None
+
+    try:
+        from backend.solver.alternatives import rank_alternatives
+        if visibility_data is None:
+            visibility_data = _get_visibility_data()
+        if mission_data is None:
+            mission_data = _load_mission_requests()
+        return rank_alternatives(
+            visibility_data,
+            mission_data,
+            schedule_result,
+            conflict_evidence,
+            request_id,
+            limit=limit,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.error("build_live_alternatives failed: %s", exc, exc_info=True)
         return None
 
 
