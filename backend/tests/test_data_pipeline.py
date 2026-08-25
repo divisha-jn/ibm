@@ -6,6 +6,7 @@ from backend.api import data_pipeline, routes
 from backend.api.routes import get_schedule
 from backend.api.schemas import ScheduleResult
 from backend.data import ground_stations, passes
+from backend.data.demo_scenarios import antenna_conflict_scenario
 from backend.data.passes import VisibilityWindow
 from backend.solver.conflicts import build_conflict_evidence
 from backend.solver.scheduler import solve_schedule
@@ -44,55 +45,10 @@ def _configure_live_visibility(monkeypatch, tmp_path):
 
 
 def _station_conflict_inputs():
-    visibility_data = {
-        "planning_horizon": {
-            "start": "2026-08-24T00:00:00Z",
-            "end": "2026-08-25T00:00:00Z",
-        },
-        "minimum_elevation_deg": 10.0,
-        "visibility_windows": [
-            {
-                "window_id": "VW_HIGH_PRIORITY",
-                "satellite_id": "NORAD_25544",
-                "station_id": "GS_SG_01",
-                "aos": "2026-08-24T10:00:00Z",
-                "los": "2026-08-24T10:15:00Z",
-                "duration_seconds": 900,
-                "max_elevation_deg": 40.0,
-            },
-            {
-                "window_id": "VW_LOW_PRIORITY",
-                "satellite_id": "NORAD_48274",
-                "station_id": "GS_SG_01",
-                "aos": "2026-08-24T10:00:00Z",
-                "los": "2026-08-24T10:15:00Z",
-                "duration_seconds": 900,
-                "max_elevation_deg": 35.0,
-            },
-        ],
-    }
-    mission_data = {
-        "scenario_id": "LIVE_CONFLICT_ENRICHMENT",
-        "requests": [
-            {
-                "request_id": "REQ_HIGH_PRIORITY",
-                "satellite_id": "NORAD_25544",
-                "required_contact_seconds": 900,
-                "priority": 9,
-                "eligible_station_ids": ["GS_SG_01"],
-                "mandatory": False,
-            },
-            {
-                "request_id": "REQ_LOW_PRIORITY",
-                "satellite_id": "NORAD_48274",
-                "required_contact_seconds": 900,
-                "priority": 5,
-                "eligible_station_ids": ["GS_SG_01"],
-                "mandatory": False,
-            },
-        ],
-    }
-    return visibility_data, mission_data
+    # Single source of truth: backend/data/demo_scenarios.py. The live-API
+    # seed script (`python -m backend.data.demo_scenarios`) reuses the exact
+    # same data so the two can't drift apart.
+    return antenna_conflict_scenario()
 
 
 def test_incompatible_legacy_cache_is_regenerated_as_canonical(monkeypatch, tmp_path):
@@ -257,6 +213,15 @@ def test_schedule_enriches_station_conflict_from_same_p2_inputs(monkeypatch):
             "request_id": "REQ_LOW_PRIORITY",
             "satellite_id": "NORAD_48274",
             "reason_codes": ["ANTENNA_RESOURCE_CONFLICT"],
+            "conflicts": [
+                {
+                    "conflicting_request_id": "REQ_HIGH_PRIORITY",
+                    "station_id": "GS_SG_01",
+                    "overlap_seconds": 900,
+                    "request_priority": 5,
+                    "conflicting_request_priority": 9,
+                }
+            ],
         }
     ]
     assert public_result["unscheduled_requests"][0]["reason_codes"] != [
