@@ -1,0 +1,21 @@
+{
+  "scenario_id": "DEMO_001",
+  "requests": [
+    {
+      "request_id": "REQ_001",
+      "satellite_id": "NORAD_25544",
+      "required_contact_seconds": 300,
+      "priority": 8,
+      "eligible_station_ids": ["GS_SG_01", "GS_PERTH_01"],
+      "mandatory": false
+    },
+    {
+      "request_id": "REQ_002",
+      "satellite_id": "NORAD_48274",
+      "required_contact_seconds": 300,
+      "priority": 5,
+      "eligible_station_ids": ["GS_SG_01", "GS_PERTH_01"],
+      "mandatory": false
+    }
+  ]
+}

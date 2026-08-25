@@ -46,7 +46,17 @@ def from_seconds(seconds, horizon_start):
         .replace("+00:00", "Z")
     ) # converts answer back to ISO format for output
 
-def solve_schedule(visibility_data, mission_data):
+def solve_schedule(
+    visibility_data,
+    mission_data,
+    *,
+    required_request_ids=None,
+    required_window_by_request=None,
+    deterministic=False,
+):
+
+    required_request_ids = set(required_request_ids or ())
+    required_window_by_request = dict(required_window_by_request or {})
 
     horizon_start = parse_iso(
         visibility_data["planning_horizon"]["start"]
@@ -54,6 +64,75 @@ def solve_schedule(visibility_data, mission_data):
 
     windows = visibility_data["visibility_windows"]
     requests = mission_data["requests"]
+
+    if required_request_ids or required_window_by_request:
+        request_ids = [request["request_id"] for request in requests]
+        duplicate_request_ids = {
+            request_id
+            for request_id in request_ids
+            if request_ids.count(request_id) > 1
+        }
+        if duplicate_request_ids:
+            raise ValueError(
+                "Constrained scheduling requires unique request IDs; duplicates: "
+                f"{sorted(duplicate_request_ids)}"
+            )
+
+        request_lookup = {
+            request["request_id"]: request
+            for request in requests
+        }
+        unknown_required_requests = (
+            required_request_ids | set(required_window_by_request)
+        ) - set(request_lookup)
+        if unknown_required_requests:
+            raise ValueError(
+                "Required request IDs do not exist: "
+                f"{sorted(unknown_required_requests)}"
+            )
+
+        windows_by_id = defaultdict(list)
+        for window in windows:
+            windows_by_id[window["window_id"]].append(window)
+
+        unique_windows = []
+        for window_id, matching_windows in windows_by_id.items():
+            first_window = matching_windows[0]
+            if any(window != first_window for window in matching_windows[1:]):
+                raise ValueError(
+                    f"Required scheduling input has conflicting window ID {window_id!r}."
+                )
+            unique_windows.append(first_window)
+        windows = unique_windows
+
+        for request_id, window_id in required_window_by_request.items():
+            matching_windows = windows_by_id.get(window_id, [])
+            if not matching_windows:
+                raise ValueError(
+                    f"Required window {window_id!r} does not exist for {request_id!r}."
+                )
+            request = request_lookup[request_id]
+            window = matching_windows[0]
+            if window["satellite_id"] != request["satellite_id"]:
+                raise ValueError(
+                    f"Required window {window_id!r} belongs to satellite "
+                    f"{window['satellite_id']!r}, not request {request_id!r}."
+                )
+            if window["station_id"] not in set(request["eligible_station_ids"]):
+                raise ValueError(
+                    f"Required window {window_id!r} uses ineligible station "
+                    f"{window['station_id']!r} for request {request_id!r}."
+                )
+
+            window_duration = int(
+                (parse_iso(window["los"]) - parse_iso(window["aos"])).total_seconds()
+            )
+            required_duration = int(request["required_contact_seconds"])
+            if window_duration < required_duration:
+                raise ValueError(
+                    f"Required window {window_id!r} is too short for request "
+                    f"{request_id!r}: {window_duration}s < {required_duration}s."
+                )
 
     model = cp_model.CpModel() # creates a new optimization problem
 
@@ -168,6 +247,25 @@ def solve_schedule(visibility_data, mission_data):
                 sum(candidate_vars) <= 1
             ) # each mission request can only be scheduled once 
 
+    for request_id in sorted(
+        required_request_ids | set(required_window_by_request)
+    ):
+        candidate_vars = request_candidate_vars.get(request_id, [])
+        if not candidate_vars:
+            raise ValueError(
+                f"Required request {request_id!r} has no feasible candidate windows."
+            )
+        model.add(sum(candidate_vars) == 1)
+
+    for request_id, window_id in required_window_by_request.items():
+        candidate = candidates.get((request_id, window_id))
+        if candidate is None:
+            raise ValueError(
+                f"Required window {window_id!r} is not a feasible candidate for "
+                f"request {request_id!r}."
+            )
+        model.add(candidate["presence"] == 1)
+
 
     for station_id, intervals in station_intervals.items():
 
@@ -193,6 +291,9 @@ def solve_schedule(visibility_data, mission_data):
 
     solver = cp_model.CpSolver()
     solver.parameters.max_time_in_seconds = 10.0
+    if deterministic:
+        solver.parameters.num_search_workers = 1
+        solver.parameters.random_seed = 0
 
     status = solver.solve(model)
     status_name = solver.status_name(status)
