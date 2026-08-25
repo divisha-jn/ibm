@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from .prompts import build_explain_messages
+from .prompts import build_explain_messages, build_what_if_outcome_messages
 
 if TYPE_CHECKING:
     from .granite import GraniteClient
@@ -14,6 +14,7 @@ def explain_conflict(
     evidence: dict[str, Any],
     *,
     request_id: str | None = None,
+    user_question: str | None = None,
     client: GraniteClient | None = None,
 ) -> str:
     """Generate a grounded explanation from P2 conflict evidence.
@@ -22,11 +23,10 @@ def explain_conflict(
     must come from the deterministic solver/conflict engine.
 
     Args:
-        evidence:   Contract #6 envelope — { "scenario_id": ..., "evidence": [...] }.
-        request_id: When supplied, only the matching record is sent to Granite.
-                    Without this, Granite receives all unscheduled records at once,
-                    which produces less focused explanations.
-        client:     Optional pre-built GraniteClient (useful in tests).
+        evidence:      Contract #6 envelope — { "scenario_id": ..., "evidence": [...] }.
+        request_id:    When supplied, only the matching record is sent to Granite.
+        user_question: Optional free-text question from the operator to focus the answer.
+        client:        Optional pre-built GraniteClient (useful in tests).
     """
     if not isinstance(evidence, dict):
         raise TypeError("evidence must be a dictionary")
@@ -51,8 +51,37 @@ def explain_conflict(
         client = GraniteClient()
 
     return client.chat(
-        build_explain_messages(evidence),
+        build_explain_messages(evidence, user_question=user_question),
         max_completion_tokens=300,
+        temperature=0.0,
+    )
+
+
+def explain_outcome(
+    operations: list[dict[str, Any]],
+    base_schedule: dict[str, Any],
+    new_schedule: dict[str, Any],
+    *,
+    client: "GraniteClient | None" = None,
+) -> str:
+    """Generate a natural-language explanation for a successful what-if outcome.
+
+    Called when the re-solve produced a valid schedule (possibly with no new
+    rejections), so there is no conflict evidence to pass to explain_conflict().
+
+    Args:
+        operations:   The list of operations that were applied (from intent).
+        base_schedule: The original contract #5 schedule before the change.
+        new_schedule:  The new contract #5 schedule after the re-solve.
+        client:        Optional pre-built GraniteClient (useful in tests).
+    """
+    if client is None:
+        from .granite import GraniteClient
+        client = GraniteClient()
+
+    return client.chat(
+        build_what_if_outcome_messages(operations, base_schedule, new_schedule),
+        max_completion_tokens=350,
         temperature=0.0,
     )
 

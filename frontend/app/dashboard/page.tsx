@@ -1,7 +1,13 @@
+"use client";
+
+import { useState } from "react";
 import MissionGantt from "../../components/MissionGantt";
 import WhatIfChat from "../../components/WhatIfChat";
+import { Mission } from "../../data/mockMissions";
 
 export default function DashboardPage() {
+  const [selectedMission, setSelectedMission] = useState<Mission | null>(null);
+
   return (
     <main
       style={{
@@ -30,8 +36,11 @@ export default function DashboardPage() {
           alignItems: "start",
         }}
       >
-        <MissionGantt />
-        <WhatIfChat scenarioId="DEMO_001" />
+        <MissionGantt
+          selectedMission={selectedMission}
+          onSelectMission={setSelectedMission}
+        />
+        <WhatIfChat scenarioId="DEMO_001" selectedMission={selectedMission} />
       </div>
     </main>
   );

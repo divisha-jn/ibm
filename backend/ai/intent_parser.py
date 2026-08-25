@@ -17,6 +17,7 @@ OperationName = Literal[
     "SET_REQUIRED_DURATION",
     "DISABLE_STATION",
     "SET_ELIGIBLE_STATIONS",
+    "SET_MANDATORY",
 ]
 
 
@@ -52,6 +53,12 @@ class Operation(BaseModel):
         elif self.operation == "DISABLE_STATION":
             if not self.station_id:
                 raise ValueError("DISABLE_STATION requires station_id.")
+
+        elif self.operation == "SET_MANDATORY":
+            if not self.request_id or self.value is None:
+                raise ValueError("SET_MANDATORY requires request_id and boolean value (1=true, 0=false).")
+            if self.value not in (0, 1):
+                raise ValueError("SET_MANDATORY value must be 0 (false) or 1 (true).")
 
         elif self.operation == "SET_ELIGIBLE_STATIONS":
             if not self.request_id or not self.station_ids:

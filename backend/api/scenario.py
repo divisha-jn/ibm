@@ -85,6 +85,11 @@ def apply_operations_to_scenario(
         Replaces eligible_station_ids for the matching request_id with
         op.station_ids.
 
+    SET_MANDATORY
+        Sets request["mandatory"] = True/False for the matching request_id.
+        When mandatory=True the solver must schedule this request; if it
+        cannot, other requests will be displaced to make room.
+
     Unknown operations are silently skipped (logged at WARNING level).
     """
     import logging
@@ -114,6 +119,11 @@ def apply_operations_to_scenario(
             for req in temp["requests"]:
                 if req["request_id"] == op.request_id:
                     req["eligible_station_ids"] = list(op.station_ids or [])
+
+        elif op.operation == "SET_MANDATORY":
+            for req in temp["requests"]:
+                if req["request_id"] == op.request_id:
+                    req["mandatory"] = bool(op.value)
 
         else:
             log.warning("apply_operations_to_scenario: unknown operation %r — skipped.", op.operation)

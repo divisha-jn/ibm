@@ -2,11 +2,19 @@ import { mapScheduleToMissions } from "./mapSchedule";
 
 const API_BASE = "http://localhost:8000/api/v1";
 
-export async function fetchExplanation(scenarioId: string, requestId: string) {
+export async function fetchExplanation(
+  scenarioId: string,
+  requestId: string,
+  userQuestion?: string
+) {
   const res = await fetch(`${API_BASE}/explain`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ scenario_id: scenarioId, request_id: requestId }),
+    body: JSON.stringify({
+      scenario_id: scenarioId,
+      request_id: requestId,
+      user_question: userQuestion,
+    }),
   });
   if (!res.ok) throw new Error(`Explain failed: ${res.status}`);
   const data = await res.json();
@@ -27,6 +35,7 @@ export interface WhatIfResponse {
     intent: string;
     operations: { operation: string; request_id: string; value: any }[];
     requires_resolve: boolean;
+    error?: string | null;
   };
   result: {
     solver_status: string;
