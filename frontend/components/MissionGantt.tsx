@@ -1,9 +1,10 @@
 "use client";
 
-import { useMemo, useState, useEffect } from "react";
+import { useMemo, useEffect } from "react";
 import styles from "./MissionGantt.module.css";
 import { Mission } from "../data/mockMissions";
-import { fetchSchedule, fetchExplanation } from "../lib/api";
+import { fetchSchedule } from "../lib/api";
+import { useState } from "react";
 
 function toMinutes(iso: string, horizonStart: number) {
   return (new Date(iso).getTime() - horizonStart) / 60000;
@@ -16,11 +17,13 @@ function formatTime(ms: number) {
   return `${hh}:${mm}`;
 }
 
-export default function MissionGantt() {
-  const [selected, setSelected] = useState<Mission | null>(null);
+interface Props {
+  selectedMission: Mission | null;
+  onSelectMission: (m: Mission | null) => void;
+}
+
+export default function MissionGantt({ selectedMission, onSelectMission }: Props) {
   const [missions, setMissions] = useState<Mission[]>([]);
-  const [explanation, setExplanation] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     fetchSchedule()
@@ -66,22 +69,6 @@ export default function MissionGantt() {
 
   const rejected = missions.filter((m) => m.status === "rejected");
 
-  async function handleClick(m: Mission) {
-    setSelected(m);
-    if (m.status === "rejected") {
-      setLoading(true);
-      setExplanation(null);
-      try {
-        const text = await fetchExplanation("DEMO_001", m.mission_id);
-        setExplanation(text);
-      } catch (err) {
-        setExplanation("Failed to load explanation — is the backend running?");
-      } finally {
-        setLoading(false);
-      }
-    }
-  }
-
   return (
     <div className={styles.wrapper}>
       <div className={styles.header}>
@@ -109,14 +96,15 @@ export default function MissionGantt() {
                 const startPct =
                   (toMinutes(m.visibility_start, horizonStart) / totalMinutes) * 100;
                 const widthPct = (m.duration_minutes / totalMinutes) * 100;
+                const isSelected = selectedMission?.mission_id === m.mission_id;
                 return (
                   <div
                     key={m.mission_id}
                     className={`${styles.block} ${
                       m.status === "rejected" ? styles.rejected : styles.scheduled
-                    }`}
+                    } ${isSelected ? styles.selected : ""}`}
                     style={{ left: `${startPct}%`, width: `${Math.max(widthPct, 6)}%` }}
-                    onClick={() => handleClick(m)}
+                    onClick={() => onSelectMission(selectedMission?.mission_id === m.mission_id ? null : m)}
                     title={`${m.mission_id} — ${m.status}`}
                   >
                     {m.mission_id}
@@ -136,23 +124,24 @@ export default function MissionGantt() {
           <span className={styles.legendSwatch} style={{ background: "#ff9f1c" }} />
           Rejected — conflict
         </span>
+        <span style={{ color: "#7c8792", fontSize: 11 }}>
+          Click any bar to explore in the AI Copilot →
+        </span>
       </div>
 
       {rejected.length > 0 && (
         <div className={styles.rejectedList}>
           {rejected.map((m) => (
-            <div key={m.mission_id} className={styles.rejectedItem}>
+            <div
+              key={m.mission_id}
+              className={styles.rejectedItem}
+              onClick={() => onSelectMission(selectedMission?.mission_id === m.mission_id ? null : m)}
+              style={{ cursor: "pointer" }}
+            >
               ⚠ {m.mission_id} rejected
               {m.rejection?.reason ? ` — ${m.rejection.reason}` : ""}
             </div>
           ))}
-        </div>
-      )}
-
-      {selected && selected.status === "rejected" && (
-        <div className={styles.rejectedList}>
-          <strong>AI Copilot:</strong>{" "}
-          {loading ? "Thinking..." : explanation}
         </div>
       )}
     </div>

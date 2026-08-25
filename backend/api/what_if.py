@@ -172,6 +172,7 @@ _MOCK_BASE_SCHEDULE = {
 
 def _get_explanation(
     intent: IntentInterpretation,
+    base_schedule: dict,
     new_schedule: dict,
     evidence_envelope: dict | None,
 ) -> str:
@@ -179,20 +180,40 @@ def _get_explanation(
     Produce a natural-language explanation for the what-if result.
 
     Priority order:
-      1. P3's explain_conflict(evidence_envelope) when evidence is available
-         and Granite is configured.
-      2. Factual string derived from the operation list (always available).
+      1. explain_conflict(evidence_envelope) when there are new rejections
+         (evidence list is non-empty) — Granite narrates why they failed.
+      2. explain_outcome(operations, base, new) when the re-solve succeeded
+         with no new rejections — Granite narrates what changed positively.
+      3. Factual fallback string when Granite is unavailable.
     """
-    if evidence_envelope:
+    has_conflict_evidence = bool(
+        evidence_envelope and evidence_envelope.get("evidence")
+    )
+
+    if has_conflict_evidence:
         try:
             from backend.ai.explain import explain_conflict
-            from backend.ai.granite import GraniteConfigurationError
-            return explain_conflict(evidence_envelope, request_id=_first_unscheduled_id(intent, new_schedule))
+            return explain_conflict(
+                evidence_envelope,
+                request_id=_first_unscheduled_id(intent, new_schedule),
+            )
         except Exception as exc:  # noqa: BLE001
             logger.info(
-                "explain_conflict unavailable (%s: %s) — using operation fallback.",
+                "explain_conflict unavailable (%s: %s) — trying outcome explanation.",
                 type(exc).__name__, exc,
             )
+
+    # No conflict evidence (everything scheduled) or explain_conflict failed —
+    # ask Granite to narrate the positive outcome instead.
+    try:
+        from backend.ai.explain import explain_outcome
+        ops_dicts = [op.model_dump(exclude_none=True) for op in intent.operations]
+        return explain_outcome(ops_dicts, base_schedule, new_schedule)
+    except Exception as exc:  # noqa: BLE001
+        logger.info(
+            "explain_outcome unavailable (%s: %s) — using operation fallback.",
+            type(exc).__name__, exc,
+        )
 
     return _build_explanation_from_ops(intent, new_schedule)
 
@@ -246,6 +267,17 @@ def _build_explanation_from_ops(
             f"{op.station_ids} and the schedule was re-solved."
         )
 
+    if op.operation == "SET_MANDATORY":
+        mandatory = bool(op.value)
+        if mandatory:
+            return (
+                f"{op.request_id} was marked mandatory. The solver must now "
+                "find a slot for it; other requests may be displaced."
+            )
+        return (
+            f"{op.request_id} was marked non-mandatory and the schedule was re-solved."
+        )
+
     return "The scenario was re-solved with the requested modifications."
 
 
@@ -260,12 +292,15 @@ def process_what_if_query(request: WhatIfRequest) -> WhatIfResponse:
     #    all fields (satellite_id, required_contact_seconds, eligible_station_ids)
     base_scenario = load_scenario(request.base_scenario_id)
 
-    # Build scenario_context for P3's intent parser — only valid identifiers
-    # so Granite cannot invent a request_id or station_id.
+    # Build scenario_context for P3's intent parser — include satellite_id so
+    # Granite can map friendly names like "SAT-B" or "NORAD_48274" to request_ids.
     scenario_context = {
         "scenario_id": base_scenario.get("scenario_id"),
         "requests": [
-            {"request_id": r["request_id"]}
+            {
+                "request_id": r["request_id"],
+                "satellite_id": r.get("satellite_id", ""),
+            }
             for r in base_scenario.get("requests", [])
         ],
         "station_ids": list({
@@ -308,7 +343,7 @@ def process_what_if_query(request: WhatIfRequest) -> WhatIfResponse:
             )
 
         # 8. Natural-language explanation  (P3, with op-based fallback)
-        explanation = _get_explanation(intent, new_schedule, evidence_envelope)
+        explanation = _get_explanation(intent, base_schedule, new_schedule, evidence_envelope)
 
         result = WhatIfResult(
             solver_status=new_schedule["solver"]["status"],

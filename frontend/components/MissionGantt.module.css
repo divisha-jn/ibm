@@ -114,6 +114,12 @@
   color: #ffd9a0;
 }
 
+.selected {
+  outline: 2px solid #ffffff;
+  outline-offset: 1px;
+  filter: brightness(1.4);
+}
+
 .legend {
   display: flex;
   gap: 20px;
