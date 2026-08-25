@@ -195,10 +195,11 @@ is the signal that there is nothing structured to render.
 
 ### `POST /alternatives`
 
-Ranked alternative resolutions for one unscheduled request — **real
-solver re-solves against candidate windows**, not an LLM suggestion.
-Ranked by operational disruption: fewest, then lowest-priority,
-displaced/rescheduled requests first.
+Ranked alternative resolutions for one unscheduled request — contract #8
+(`contracts/alternatives.example.json`). **Real solver re-solves against
+candidate windows**, not an LLM suggestion. Ranked by operational
+disruption: fewest, then lowest-priority, displaced/rescheduled requests
+first.
 
 **Request** — `AlternativesRequest`:
 ```json

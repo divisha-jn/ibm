@@ -1,0 +1,43 @@
+{
+  "scenario_id": "DEMO_001",
+  "request_id": "REQ_002",
+  "satellite_id": "NORAD_48274",
+  "status": "ALTERNATIVES_FOUND",
+  "reason_codes": ["ANTENNA_RESOURCE_CONFLICT"],
+  "alternatives": [
+    {
+      "rank": 1,
+      "alternative_type": "ALTERNATIVE_WINDOW",
+      "window_id": "VW_0042",
+      "station_id": "GS_PERTH_01",
+      "scheduled_start": "2026-08-27T08:10:00Z",
+      "scheduled_end": "2026-08-27T08:15:00Z",
+      "duration_seconds": 300,
+      "displaced_request_ids": [],
+      "rescheduled_request_ids": [],
+      "ranking_metrics": {
+        "displaced_count": 0,
+        "displaced_priority_total": 0,
+        "rescheduled_count": 0,
+        "rescheduled_priority_total": 0
+      }
+    },
+    {
+      "rank": 2,
+      "alternative_type": "ALTERNATIVE_WINDOW",
+      "window_id": "VW_0057",
+      "station_id": "GS_SG_01",
+      "scheduled_start": "2026-08-27T14:02:00Z",
+      "scheduled_end": "2026-08-27T14:07:00Z",
+      "duration_seconds": 300,
+      "displaced_request_ids": [],
+      "rescheduled_request_ids": ["REQ_004"],
+      "ranking_metrics": {
+        "displaced_count": 0,
+        "displaced_priority_total": 0,
+        "rescheduled_count": 1,
+        "rescheduled_priority_total": 6
+      }
+    }
+  ]
+}

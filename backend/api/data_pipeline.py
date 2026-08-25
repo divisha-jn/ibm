@@ -342,10 +342,11 @@ def build_live_alternatives(
     windows for one unscheduled request, ranked by operational disruption
     (real re-solves against candidate windows — not an LLM suggestion).
 
-    Returns a dict shaped like rank_alternatives()'s output, or None on any
-    failure — unknown request_id, malformed inputs, and solver errors all
-    collapse to None here, matching every other build_live_* function's
-    fail-inward style. The caller serves a PIPELINE_UNAVAILABLE fallback.
+    Returns a contract #8 dict (contracts/alternatives.example.json), or
+    None on any failure — unknown request_id, malformed inputs, and solver
+    errors all collapse to None here, matching every other build_live_*
+    function's fail-inward style. The caller serves a PIPELINE_UNAVAILABLE
+    fallback.
     """
     if not _ortools_available():
         return None

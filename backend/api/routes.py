@@ -209,9 +209,10 @@ def _explain_from_evidence(request_id: str, evidence_envelope: dict | None) -> s
 def get_alternatives(request: AlternativesRequest):
     """
     Returns solver-validated ranked alternative resolutions for one
-    unscheduled request — real re-solves against candidate windows, ranked
-    by operational disruption (fewest and lowest-priority displaced/
-    rescheduled requests first). Not an LLM suggestion.
+    unscheduled request — contract #8 (contracts/alternatives.example.json).
+    Real re-solves against candidate windows, ranked by operational
+    disruption (fewest and lowest-priority displaced/rescheduled requests
+    first). Not an LLM suggestion.
 
     Falls back to a PIPELINE_UNAVAILABLE status (still HTTP 200, matching
     /schedule and /explain's fail-inward convention) when ortools is

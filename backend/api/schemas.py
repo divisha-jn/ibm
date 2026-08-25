@@ -128,8 +128,9 @@ class ApplyWhatIfResponse(BaseModel):
     schedule: Dict[str, Any]  # full contract #5 shape — the newly-committed baseline
 
 # ---------------------------------------------------------------------------
-# Ranked alternatives — real, solver-validated alternative windows for one
-# unscheduled request (P2's rank_alternatives(), not an LLM suggestion).
+# Contract #8 — ranked alternatives (contracts/alternatives.example.json).
+# Real, solver-validated alternative windows for one unscheduled request
+# (P2's rank_alternatives(), not an LLM suggestion).
 # ---------------------------------------------------------------------------
 
 class AlternativesRequest(BaseModel):
