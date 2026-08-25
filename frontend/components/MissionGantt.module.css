@@ -18,6 +18,11 @@
   border: 1px solid var(--border);
   border-radius: 4px;
   padding: 20px;
+  overflow-x: auto;
+}
+
+.scrollArea{
+    min-width: 900px;
 }
 
 .header {
@@ -86,6 +91,7 @@
   position: absolute;
   top: 2px;
   height: 28px;
+  min-width:70px;
   border-radius: 3px;
   font-family: "IBM Plex Mono", monospace;
   font-size: 11px;

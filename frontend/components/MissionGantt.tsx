@@ -91,41 +91,44 @@ export default function MissionGantt() {
         </span>
       </div>
 
-      <div className={styles.axis}>
-        {ticks.map((t, i) => (
-          <span key={`${t.label}-${i}`} className={styles.axisTick} style={{ left: `${t.pct}%` }}>
-            {t.label}
-          </span>
+      <div className={styles.scrollArea}>
+        <div className={styles.axis}>
+          {ticks.map((t, i) => (
+            <span key={`${t.label}-${i}`} className={styles.axisTick} style={{ left: `${t.pct}%` }}>
+              {t.label}
+            </span>
+          ))}
+        </div>
+
+        {stations.map((station) => (
+          <div key={station} className={styles.row}>
+            <div className={styles.stationLabel}>{station}</div>
+            <div className={styles.track}>
+              {missions
+                .filter((m) => m.station === station && m.visibility_start)
+                .map((m) => {
+                  const rawStartPct =
+                    (toMinutes(m.visibility_start, horizonStart) / totalMinutes) * 100;
+                  const widthPct = Math.max((m.duration_minutes / totalMinutes) * 100, 6);
+                  const startPct = Math.min(rawStartPct, 100 - widthPct);
+                  return (
+                    <div
+                      key={m.mission_id}
+                      className={`${styles.block} ${
+                        m.status === "rejected" ? styles.rejected : styles.scheduled
+                      }`}
+                      style={{ left: `${startPct}%`, width: `${widthPct}%` }}
+                      onClick={() => handleClick(m)}
+                      title={`${m.mission_id} — ${m.status}`}
+                    >
+                      {m.mission_id}
+                    </div>
+                  );
+                })}
+            </div>
+          </div>
         ))}
       </div>
-
-      {stations.map((station) => (
-        <div key={station} className={styles.row}>
-          <div className={styles.stationLabel}>{station}</div>
-          <div className={styles.track}>
-            {missions
-              .filter((m) => m.station === station && m.visibility_start)
-              .map((m) => {
-                const startPct =
-                  (toMinutes(m.visibility_start, horizonStart) / totalMinutes) * 100;
-                const widthPct = (m.duration_minutes / totalMinutes) * 100;
-                return (
-                  <div
-                    key={m.mission_id}
-                    className={`${styles.block} ${
-                      m.status === "rejected" ? styles.rejected : styles.scheduled
-                    }`}
-                    style={{ left: `${startPct}%`, width: `${Math.max(widthPct, 6)}%` }}
-                    onClick={() => handleClick(m)}
-                    title={`${m.mission_id} — ${m.status}`}
-                  >
-                    {m.mission_id}
-                  </div>
-                );
-              })}
-          </div>
-        </div>
-      ))}
 
       <div className={styles.legend}>
         <span>
