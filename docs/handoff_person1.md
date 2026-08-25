@@ -36,4 +36,4 @@ be agreed on together.
 
 ## Notes for Person 4
 Don't call generate_all_visibility_windows() on every API request — it hits
-CelesTrak over the network. Cache the result instead.
+CelesTrak over the network. Cache the result instead
