@@ -2,6 +2,18 @@ from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
 
 # ---------------------------------------------------------------------------
+# Shared — one conflicting-contact detail. Used by both /schedule
+# (unscheduled_requests[].conflicts) and /explain (evidence.conflicts).
+# ---------------------------------------------------------------------------
+
+class ConflictRecord(BaseModel):
+    conflicting_request_id: str
+    station_id: str
+    overlap_seconds: int
+    request_priority: int
+    conflicting_request_priority: Optional[int]
+
+# ---------------------------------------------------------------------------
 # Contract #5 — schedule_result  (P2 → P4/P5)
 # ---------------------------------------------------------------------------
 
@@ -20,6 +32,7 @@ class UnscheduledRequest(BaseModel):
     request_id: str
     satellite_id: str
     reason_codes: List[str]
+    conflicts: List[ConflictRecord] = []
 
 class SolverMeta(BaseModel):
     engine: str
@@ -39,13 +52,6 @@ class ScheduleResult(BaseModel):
 class ExplainRequest(BaseModel):
     scenario_id: str
     request_id: str
-
-class ConflictRecord(BaseModel):
-    conflicting_request_id: str
-    station_id: str
-    overlap_seconds: int
-    request_priority: int
-    conflicting_request_priority: Optional[int]
 
 class ExplainEvidence(BaseModel):
     reason_codes: List[str]

@@ -105,7 +105,16 @@ Returns the baseline schedule (contract #5). No request body.
     {
       "request_id": "REQ_002",
       "satellite_id": "NORAD_48274",
-      "reason_codes": ["ANTENNA_RESOURCE_CONFLICT"]
+      "reason_codes": ["ANTENNA_RESOURCE_CONFLICT"],
+      "conflicts": [
+        {
+          "conflicting_request_id": "REQ_001",
+          "station_id": "GS_SG_01",
+          "overlap_seconds": 240,
+          "request_priority": 5,
+          "conflicting_request_priority": 8
+        }
+      ]
     }
   ]
 }
@@ -114,6 +123,15 @@ Returns the baseline schedule (contract #5). No request body.
 `solver.objective_value` is `null` when the solver reports a non-`OPTIMAL`
 status. There's no field that tells you whether this is the live solve or
 the hardcoded fallback — the shape is identical either way by design.
+
+`unscheduled_requests[].conflicts` is the same `ConflictRecord` shape as
+`/explain`'s `evidence.conflicts` — this is so P5 can render a rejection
+banner (who it lost to, at which station, how much overlap, both
+priorities) directly from `/schedule` without a separate `/explain` call
+per rejected request. It's `[]` when the request had no competing contact
+(e.g. `reason_codes: ["NO_ELIGIBLE_VISIBILITY_WINDOW"]`) — only nonempty
+alongside conflict-driven reason codes like `ANTENNA_RESOURCE_CONFLICT` or
+`OPTIMIZATION_TRADEOFF`.
 
 ### `POST /explain`
 
