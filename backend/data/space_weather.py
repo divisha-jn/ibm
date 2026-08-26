@@ -43,6 +43,7 @@ CACHE_MAX_AGE_SECONDS = 6 * 60 * 60  # 6 hours — advisories don't need to be f
 NASA_API_KEY = os.environ.get("NASA_API_KEY", "DEMO_KEY")
 
 EventType = Literal["FLR", "GST"]
+FetchStatus = Literal["ok", "stale", "failed"]
 
 
 class SpaceWeatherError(RuntimeError):
@@ -61,14 +62,26 @@ def _cache_is_fresh(path: Path) -> bool:
 
 def _fetch_donki_events(
     event_type: EventType, start_date: str, end_date: str, force_refresh: bool = False
-) -> List[dict]:
+) -> tuple[List[dict], Literal["ok", "stale"]]:
     """Fetch one event type (FLR or GST) from DONKI for a date range.
-    Dates must be 'YYYY-MM-DD' strings."""
+    Dates must be 'YYYY-MM-DD' strings.
+
+    Returns the raw events and whether they are fresh (``ok``) or a stale
+    cache fallback used after a failed DONKI refresh (``stale``).
+    """
     cache_file = _cache_path(event_type, start_date, end_date)
 
     if not force_refresh and _cache_is_fresh(cache_file):
-        with open(cache_file, "r") as f:
-            return json.load(f)
+        try:
+            with open(cache_file, "r") as f:
+                return json.load(f), "ok"
+        except (OSError, json.JSONDecodeError) as exc:
+            # A broken fresh cache is not usable; try DONKI before declaring
+            # this event type unavailable.
+            print(
+                f"[space_weather] WARNING: could not read fresh {event_type} "
+                f"cache; refreshing from DONKI: {exc}"
+            )
 
     url = f"{DONKI_BASE_URL}/{event_type}"
     params = {"startDate": start_date, "endDate": end_date, "api_key": NASA_API_KEY}
@@ -80,14 +93,29 @@ def _fetch_donki_events(
     except (requests.RequestException, json.JSONDecodeError) as exc:
         # Fall back to stale cache rather than crashing the pipeline mid-demo
         if cache_file.exists():
-            with open(cache_file, "r") as f:
-                return json.load(f)
-        raise SpaceWeatherError(f"Failed to fetch DONKI {event_type} data and no cache available: {exc}") from exc
+            try:
+                with open(cache_file, "r") as f:
+                    return json.load(f), "stale"
+            except (OSError, json.JSONDecodeError) as cache_exc:
+                raise SpaceWeatherError(
+                    f"Failed to fetch DONKI {event_type} data and the cache "
+                    f"is unusable: {cache_exc}"
+                ) from exc
+        raise SpaceWeatherError(
+            f"Failed to fetch DONKI {event_type} data and no cache available: {exc}"
+        ) from exc
 
-    with open(cache_file, "w") as f:
-        json.dump(data, f, indent=2)
+    try:
+        with open(cache_file, "w") as f:
+            json.dump(data, f, indent=2)
+    except OSError as exc:
+        # The live result is still fresh and usable even if caching it fails.
+        print(
+            f"[space_weather] WARNING: could not cache fresh {event_type} "
+            f"data: {exc}"
+        )
 
-    return data
+    return data, "ok"
 
 
 def _normalize_flare(raw: dict) -> dict:
@@ -110,7 +138,11 @@ def _normalize_geomagnetic_storm(raw: dict) -> dict:
     # Keep every individual Kp reading with its own timestamp, not just the max —
     # P2 needs to know WHEN the peak actually happened relative to a scheduled contact.
     kp_readings = [
-        {"time": k.get("observedTime"), "kp_index": k.get("kpIndex")}
+        {
+            "time": k.get("observedTime"),
+            "kp_index": k.get("kpIndex"),
+            "source": k.get("source"),
+        }
         for k in kp_values
     ]
     max_kp = max((k.get("kpIndex", 0) for k in kp_values), default=None)
@@ -145,28 +177,38 @@ def fetch_space_weather_events(
         {
             "events": [...],               # normalized advisory dicts, sorted by start_time
             "fetch_status": {
-                "FLR": "ok" | "failed",     # "ok" = NASA responded, even if it returned zero events
-                "GST": "ok" | "failed",     # "failed" = the request itself didn't succeed
+                "FLR": "ok" | "stale" | "failed",
+                "GST": "ok" | "stale" | "failed",
             }
         }
 
+        Status meanings:
+        - "ok": fresh usable data from DONKI or the fresh cache; this includes
+          a successful response containing zero events.
+        - "stale": a DONKI refresh failed and stale cached data was returned.
+        - "failed": neither DONKI nor the cache provided usable data.
+
         IMPORTANT for P2: an empty events list only means clear weather if
-        fetch_status says "ok" for that type. If fetch_status says "failed",
-        treat it as unknown risk, not confirmed-clear — don't schedule as if
-        it's safe just because the list is empty.
+        fetch_status says "ok" for that type. If fetch_status says "stale" or
+        "failed", treat it as unknown risk, not confirmed-clear — don't
+        schedule as if it's safe just because the list is empty.
     """
     events: List[dict] = []
-    fetch_status = {"FLR": "ok", "GST": "ok"}
+    fetch_status: dict[EventType, FetchStatus] = {"FLR": "failed", "GST": "failed"}
 
     try:
-        flares = _fetch_donki_events("FLR", start_date, end_date, force_refresh)
+        flares, fetch_status["FLR"] = _fetch_donki_events(
+            "FLR", start_date, end_date, force_refresh
+        )
         events.extend(_normalize_flare(f) for f in flares)
     except SpaceWeatherError as exc:
         print(f"[space_weather] WARNING: FLR fetch failed: {exc}")
         fetch_status["FLR"] = "failed"
 
     try:
-        storms = _fetch_donki_events("GST", start_date, end_date, force_refresh)
+        storms, fetch_status["GST"] = _fetch_donki_events(
+            "GST", start_date, end_date, force_refresh
+        )
         events.extend(_normalize_geomagnetic_storm(s) for s in storms)
     except SpaceWeatherError as exc:
         print(f"[space_weather] WARNING: GST fetch failed: {exc}")
