@@ -69,8 +69,11 @@ _REASON_ORDER = (
     "RECOVERY_REQUIRES_RESCHEDULING",
     "RECOVERY_REQUIRES_DISPLACEMENT",
     "SOLAR_FLARE_OVERLAP",
+    "GEOMAGNETIC_STORM_CONTACT_RELEVANT",
     "GEOMAGNETIC_ACTIVITY_CONTEXT",
+    "INVALID_KP_READING",
     "SPACE_WEATHER_EVENT_INVALID",
+    "SPACE_WEATHER_DATA_STALE",
     "SPACE_WEATHER_DATA_UNKNOWN",
 )
 
@@ -754,6 +757,21 @@ def _weather_status(status: dict | None) -> str:
     if status is None:
         return "UNKNOWN"
     _require_mapping(status, "space_weather_status")
+
+    p1_values = []
+    for event_type in ("FLR", "GST"):
+        value = status.get(event_type)
+        if isinstance(value, str):
+            p1_values.append(value.lower())
+    if len(p1_values) == 2 and all(
+        value in {"ok", "stale", "failed"} for value in p1_values
+    ):
+        if all(value == "ok" for value in p1_values):
+            return "COMPLETE"
+        if all(value == "failed" for value in p1_values):
+            return "UNAVAILABLE"
+        return "PARTIAL"
+
     direct = status.get("data_status", status.get("status"))
     if isinstance(direct, str):
         normalized = direct.upper()
@@ -776,6 +794,16 @@ def _weather_status(status: dict | None) -> str:
         if values:
             return "PARTIAL"
     return "UNKNOWN"
+
+
+def _weather_uses_stale_data(status: dict | None) -> bool:
+    if not isinstance(status, dict):
+        return False
+    return any(
+        isinstance(status.get(event_type), str)
+        and status[event_type].lower() == "stale"
+        for event_type in ("FLR", "GST")
+    )
 
 
 def _safe_event_time(event: dict, field: str) -> datetime | None:
@@ -815,6 +843,21 @@ def _flare_factor_score(class_type: Any) -> float | None:
     return 0.0
 
 
+def _kp_factor_score(kp_index: float) -> float:
+    """Map observed Kp severity to the team-defined V1 product-policy score."""
+    if kp_index < 5:
+        return 0.0
+    if kp_index < 6:
+        return 0.2
+    if kp_index < 7:
+        return 0.4
+    if kp_index < 8:
+        return 0.6
+    if kp_index < 9:
+        return 0.8
+    return 1.0
+
+
 def _space_weather_factor(
     events: list[dict] | None,
     status: dict | None,
@@ -829,8 +872,11 @@ def _space_weather_factor(
     quality = _weather_status(status)
     matched_events = []
     context_events = []
+    matched_kp_readings = []
     invalid_event = False
+    invalid_kp_reading = False
     flare_scores = []
+    gst_scores = []
     reasons = []
 
     for event in events:
@@ -861,13 +907,64 @@ def _space_weather_factor(
             start = _safe_event_time(event, "start_time")
             if start is None:
                 invalid_event = True
-                continue
             kp = event.get("max_kp_index")
             if kp is not None and (
                 isinstance(kp, bool) or not isinstance(kp, (int, float)) or not 0 <= kp <= 9
             ):
                 invalid_event = True
-            if horizon_start <= start <= horizon_end:
+            is_context_event = (
+                start is not None and horizon_start <= start <= horizon_end
+            )
+
+            kp_readings = event.get("kp_readings")
+            if kp_readings is None:
+                # Backward compatibility: old P1 GST records remain context-only.
+                if is_context_event:
+                    context_events.append(copy.deepcopy(event))
+                    reasons.append("GEOMAGNETIC_ACTIVITY_CONTEXT")
+                continue
+            if not isinstance(kp_readings, list):
+                invalid_event = True
+                invalid_kp_reading = True
+                if is_context_event:
+                    context_events.append(copy.deepcopy(event))
+                    reasons.append("GEOMAGNETIC_ACTIVITY_CONTEXT")
+                continue
+
+            event_matches_contact = False
+            for reading in kp_readings:
+                if not isinstance(reading, dict):
+                    invalid_event = True
+                    invalid_kp_reading = True
+                    continue
+                observed_at = _safe_event_time(reading, "time")
+                observed_kp = reading.get("kp_index")
+                if observed_at is None or (
+                    isinstance(observed_kp, bool)
+                    or not isinstance(observed_kp, (int, float))
+                    or not 0 <= observed_kp <= 9
+                ):
+                    invalid_event = True
+                    invalid_kp_reading = True
+                    continue
+                if (
+                    schedule_status == "SCHEDULED"
+                    and contact is not None
+                    and contact["_start"] <= observed_at < contact["_end"]
+                ):
+                    matched_kp_readings.append(
+                        {
+                            "time": reading.get("time"),
+                            "kp_index": observed_kp,
+                            "source": copy.deepcopy(reading.get("source")),
+                        }
+                    )
+                    gst_scores.append(_kp_factor_score(observed_kp))
+                    event_matches_contact = True
+            if event_matches_contact:
+                matched_events.append(copy.deepcopy(event))
+                reasons.append("GEOMAGNETIC_STORM_CONTACT_RELEVANT")
+            elif is_context_event:
                 context_events.append(copy.deepcopy(event))
                 reasons.append("GEOMAGNETIC_ACTIVITY_CONTEXT")
         else:
@@ -875,16 +972,34 @@ def _space_weather_factor(
 
     matched_events.sort(key=_event_sort_key)
     context_events.sort(key=_event_sort_key)
+    matched_kp_readings.sort(
+        key=lambda reading: (
+            str(reading["time"]),
+            reading["kp_index"],
+            str(reading["source"] or ""),
+        )
+    )
     if invalid_event:
         reasons.append("SPACE_WEATHER_EVENT_INVALID")
+    if invalid_kp_reading:
+        reasons.append("INVALID_KP_READING")
+
+    effective_kp_index = max(
+        (reading["kp_index"] for reading in matched_kp_readings),
+        default=None,
+    )
+    environmental_scores = flare_scores + gst_scores
 
     if schedule_status != "SCHEDULED":
         state = "NOT_ASSESSED_UNSCHEDULED"
         factor_score = None
         points = None
-    elif flare_scores:
-        factor_score = max(flare_scores)
-        state = "SOLAR_FLARE_OVERLAP"
+    elif environmental_scores:
+        factor_score = max(environmental_scores)
+        if gst_scores and (not flare_scores or max(gst_scores) > max(flare_scores)):
+            state = "GEOMAGNETIC_STORM_CONTACT_RELEVANT"
+        else:
+            state = "SOLAR_FLARE_OVERLAP"
         points = round(SPACE_WEATHER_WEIGHT * factor_score)
     elif quality == "COMPLETE" and not invalid_event:
         factor_score = 0.0
@@ -897,7 +1012,9 @@ def _space_weather_factor(
 
     if quality != "COMPLETE":
         reasons.append("SPACE_WEATHER_DATA_UNKNOWN")
-    if invalid_event and schedule_status == "SCHEDULED" and not flare_scores:
+    if _weather_uses_stale_data(status):
+        reasons.append("SPACE_WEATHER_DATA_STALE")
+    if invalid_event and schedule_status == "SCHEDULED" and not environmental_scores:
         factor_score = 0.5
         state = "UNKNOWN"
         points = round(SPACE_WEATHER_WEIGHT * factor_score)
@@ -912,6 +1029,8 @@ def _space_weather_factor(
             "points": points,
             "matched_events": matched_events,
             "context_events": context_events,
+            "matched_kp_readings": matched_kp_readings,
+            "effective_kp_index": effective_kp_index,
         },
         reasons,
     )
