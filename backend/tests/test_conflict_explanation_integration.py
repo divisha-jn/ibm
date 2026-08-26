@@ -34,7 +34,7 @@ def test_real_p2_conflict_evidence_flows_through_p4_to_p3():
     client.chat.assert_called_once()
     messages = client.chat.call_args.args[0]
     supplied_evidence = json.loads(
-        messages[1]["content"].split("authoritative solver evidence.\n\n", 1)[1]
+        messages[1]["content"].split("\n\n", 1)[1]
     )
     assert supplied_evidence == {
         "scenario_id": "P2_REALISTIC_INTEGRATION_001",
