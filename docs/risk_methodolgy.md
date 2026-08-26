@@ -207,13 +207,70 @@ https://www.spaceweather.gov/phenomena/solar-flares-radio-blackouts
 
 ### Geomagnetic storms
 
-P1 supplies GST `start_time` and `max_kp_index`, but does not retain the time
-of the maximum Kp observation or a justified active interval. GST records
-whose start lies in the planning horizon are therefore returned only in
-`context_events` with `GEOMAGNETIC_ACTIVITY_CONTEXT`. They contribute no
-contact-specific V1 points. No storm duration is inferred.
+P1 supplies GST `start_time`, `max_kp_index`, `max_kp_time`, and individual
+timed `kp_readings`. Each reading has `time`, `kp_index`, and nullable
+`source`. A reading is contact-relevant only when its valid timezone-aware
+timestamp falls in the contact's half-open interval:
+
+```text
+scheduled_start <= kp_reading.time < scheduled_end
+```
+
+`start_time`, event-wide `max_kp_index`, and an out-of-contact `max_kp_time`
+never create contact-specific points. No GST duration or applicability window
+is inferred. Old GST records without `kp_readings` remain context-only.
+
+For multiple valid in-contact readings, P2 preserves every matched reading as
+evidence and uses only the maximum Kp:
+
+| Maximum contact-relevant Kp | Factor score | Points |
+|---:|---:|---:|
+| `< 5` | 0.00 | 0 |
+| `5 <= Kp < 6` | 0.20 | 2 |
+| `6 <= Kp < 7` | 0.40 | 4 |
+| `7 <= Kp < 8` | 0.60 | 6 |
+| `8 <= Kp < 9` | 0.80 | 8 |
+| `>= 9` (valid Kp range caps at 9) | 1.00 | 10 |
+
+Kp is observed environmental-severity input. Mapping Kp severity to these
+Operational Risk Index points is team-defined product policy. It is not a
+probability of contact failure or a prediction of satellite damage.
+
+When both a timed GST reading and an overlapping solar flare are relevant,
+P2 uses the maximum of their factor scores. It never adds them, so the entire
+Space Weather factor remains capped at 10 points. The output preserves both
+events and all valid matched Kp readings as evidence.
 
 ## Space-weather data quality
+
+P1 supplies per-type status as:
+
+```json
+{
+  "FLR": "ok" | "stale" | "failed",
+  "GST": "ok" | "stale" | "failed"
+}
+```
+
+- `ok` means fresh usable live or cached data, including a successful result
+  containing zero events.
+- `stale` means a refresh failed and stale cached data was returned. Its
+  events remain usable evidence, but data quality is degraded.
+- `failed` means no usable live or cached data exists for that type.
+
+P2 derives overall weather quality deterministically:
+
+| FLR | GST | Weather quality |
+|---|---|---|
+| `ok` | `ok` | `COMPLETE` |
+| `failed` | `failed` | `UNAVAILABLE` |
+| Any other valid combination | | `PARTIAL` |
+
+Therefore `events=[]` with `ok`/`ok` is confirmed clear and contributes zero
+points. Empty events with partial or unavailable data do not prove clear
+conditions and retain the existing conservative neutral policy. Staleness
+does not itself add numerical severity points: valid evidence from a stale
+type is scored normally while status remains `PARTIAL`.
 
 Absence of `space_weather_status` means `UNKNOWN`. In particular, an empty
 event list without status is not confirmed clear weather:
@@ -224,17 +281,20 @@ unknown points = 5
 reason = SPACE_WEATHER_DATA_UNKNOWN
 ```
 
-An explicit `COMPLETE` status plus no contact-relevant flare produces zero
+An explicit `COMPLETE` status plus no contact-relevant event produces zero
 points. `PARTIAL`, `UNAVAILABLE`, or `UNKNOWN` status preserves the neutral
-five-point policy unless verified overlapping flare evidence supplies a
-different factor score. Verified positive flare evidence is scored even when
-status is partial, while the data-quality warning remains.
+five-point policy unless valid contact-relevant flare or Kp evidence supplies
+a different factor score. Valid evidence is scored even when status is
+partial, while the data-quality warning remains.
 
-Malformed events produce `SPACE_WEATHER_EVENT_INVALID`. If no valid positive
-evidence remains, V1 uses the neutral factor.
+Malformed events produce `SPACE_WEATHER_EVENT_INVALID`; malformed individual
+Kp observations additionally produce `INVALID_KP_READING`. Invalid readings
+are ignored rather than converted to Kp zero. Other valid readings remain
+usable. If no valid contact-relevant evidence remains, V1 uses the neutral
+factor.
 
-Supported status forms include a top-level `data_status`/`status`, or future
-per-event-type statuses under `event_types`.
+For backward compatibility, supported legacy status forms include a top-level
+`data_status`/`status` or per-event-type statuses under `event_types`.
 
 ## Scheduled and unscheduled behavior
 
@@ -282,9 +342,12 @@ Risk V1 adds:
 - `RECOVERY_REQUIRES_RESCHEDULING`
 - `RECOVERY_REQUIRES_DISPLACEMENT`
 - `SOLAR_FLARE_OVERLAP`
+- `GEOMAGNETIC_STORM_CONTACT_RELEVANT`
 - `GEOMAGNETIC_ACTIVITY_CONTEXT`
-- `SPACE_WEATHER_DATA_UNKNOWN`
+- `INVALID_KP_READING`
 - `SPACE_WEATHER_EVENT_INVALID`
+- `SPACE_WEATHER_DATA_STALE`
+- `SPACE_WEATHER_DATA_UNKNOWN`
 
 Reason order and all lists in the output are deterministic.
 
@@ -311,7 +374,5 @@ inputs, including:
 - Priority is consequence, not failure likelihood.
 - `mandatory` and `max_elevation_deg` are not scored.
 - Space-weather applicability is not satellite-, frequency-, or station-specific.
-- GST cannot be tied to a contact until timed Kp observations or a justified
-  active interval are supplied.
-- The current P1 list cannot distinguish successful no-event retrieval from
-  failed retrieval without separate status metadata.
+- Timed Kp readings are treated only as instantaneous evidence; no activity
+  interval is inferred between readings.

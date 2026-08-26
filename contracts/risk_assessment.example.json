@@ -76,7 +76,9 @@
       "factor_score": 0.0,
       "points": 0,
       "matched_events": [],
-      "context_events": []
+      "context_events": [],
+      "matched_kp_readings": [],
+      "effective_kp_index": null
     }
   },
   "data_quality": {

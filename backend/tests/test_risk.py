@@ -245,6 +245,38 @@ def _flare(class_type="M2.3", *, start="2026-08-25T10:01:00Z", end="2026-08-25T1
     }
 
 
+def _p1_weather_status(flr="ok", gst="ok"):
+    return {"FLR": flr, "GST": gst}
+
+
+def _gst(readings, *, start="2026-08-25T09:00:00Z"):
+    numeric_kp = [
+        reading.get("kp_index")
+        for reading in readings
+        if isinstance(reading, dict)
+        and isinstance(reading.get("kp_index"), (int, float))
+        and not isinstance(reading.get("kp_index"), bool)
+    ]
+    max_kp = max(numeric_kp, default=None)
+    max_reading = next(
+        (
+            reading
+            for reading in readings
+            if isinstance(reading, dict) and reading.get("kp_index") == max_kp
+        ),
+        {},
+    )
+    return {
+        "event_type": "geomagnetic_storm",
+        "event_id": "GST_1",
+        "start_time": start,
+        "max_kp_index": max_kp,
+        "max_kp_time": max_reading.get("time"),
+        "kp_readings": copy.deepcopy(readings),
+        "advisory": "fixture",
+    }
+
+
 # Scheduling flexibility ----------------------------------------------------
 
 
@@ -549,6 +581,219 @@ def test_positive_flare_is_scored_while_partial_status_is_preserved():
     assert "SPACE_WEATHER_DATA_UNKNOWN" in result["reason_codes"]
 
 
+@pytest.mark.parametrize(
+    ("flr_status", "gst_status", "quality", "points"),
+    [
+        ("ok", "ok", "COMPLETE", 0),
+        ("ok", "stale", "PARTIAL", 5),
+        ("stale", "ok", "PARTIAL", 5),
+        ("stale", "stale", "PARTIAL", 5),
+        ("ok", "failed", "PARTIAL", 5),
+        ("failed", "ok", "PARTIAL", 5),
+        ("stale", "failed", "PARTIAL", 5),
+        ("failed", "stale", "PARTIAL", 5),
+        ("failed", "failed", "UNAVAILABLE", 5),
+    ],
+)
+def test_p1_fetch_status_mapping(flr_status, gst_status, quality, points):
+    result = _assess_scheduled(
+        events=[],
+        weather_status=_p1_weather_status(flr_status, gst_status),
+    )
+    factor = result["factors"]["space_weather"]
+    assert factor["status"] == quality
+    assert factor["points"] == points
+    assert factor["state"] == ("CLEAR" if quality == "COMPLETE" else "UNKNOWN")
+
+
+def test_stale_status_is_reported_without_adding_severity_points():
+    result = _assess_scheduled(
+        events=[], weather_status=_p1_weather_status("ok", "stale")
+    )
+    assert "SPACE_WEATHER_DATA_STALE" in result["reason_codes"]
+    assert "SPACE_WEATHER_DATA_UNKNOWN" in result["reason_codes"]
+
+
+def test_failed_empty_weather_is_not_clear():
+    factor = _assess_scheduled(
+        events=[], weather_status=_p1_weather_status("failed", "failed")
+    )["factors"]["space_weather"]
+    assert factor["status"] == "UNAVAILABLE"
+    assert factor["state"] == "UNKNOWN"
+    assert factor["factor_score"] == 0.5
+
+
+@pytest.mark.parametrize(
+    ("kp_index", "factor_score", "points"),
+    [
+        (4, 0.0, 0),
+        (5, 0.2, 2),
+        (6, 0.4, 4),
+        (7, 0.6, 6),
+        (8, 0.8, 8),
+        (9, 1.0, 10),
+    ],
+)
+def test_contact_relevant_kp_mapping(kp_index, factor_score, points):
+    event = _gst(
+        [
+            {
+                "time": "2026-08-25T10:01:00Z",
+                "kp_index": kp_index,
+                "source": "NOAA",
+            }
+        ]
+    )
+    result = _assess_scheduled(
+        events=[event], weather_status=_p1_weather_status()
+    )
+    factor = result["factors"]["space_weather"]
+    assert factor["factor_score"] == factor_score
+    assert factor["points"] == points
+    assert factor["effective_kp_index"] == kp_index
+    assert factor["matched_kp_readings"] == event["kp_readings"]
+    assert factor["context_events"] == []
+    assert "GEOMAGNETIC_STORM_CONTACT_RELEVANT" in result["reason_codes"]
+
+
+@pytest.mark.parametrize(
+    ("observed_at", "matched"),
+    [
+        ("2026-08-25T09:59:59Z", False),
+        ("2026-08-25T10:00:00Z", True),
+        ("2026-08-25T10:05:00Z", False),
+    ],
+)
+def test_kp_contact_matching_uses_half_open_interval(observed_at, matched):
+    event = _gst(
+        [{"time": observed_at, "kp_index": 8, "source": "NOAA"}]
+    )
+    factor = _assess_scheduled(
+        events=[event], weather_status=_p1_weather_status()
+    )["factors"]["space_weather"]
+    assert bool(factor["matched_kp_readings"]) is matched
+    assert factor["points"] == (8 if matched else 0)
+
+
+def test_multiple_contact_kp_readings_preserve_evidence_and_use_maximum():
+    readings = [
+        {"time": "2026-08-25T10:00:00Z", "kp_index": 5, "source": "NOAA"},
+        {"time": "2026-08-25T10:02:00Z", "kp_index": 7, "source": None},
+        {"time": "2026-08-25T10:04:00Z", "kp_index": 6, "source": "GFZ"},
+        {"time": "2026-08-25T10:06:00Z", "kp_index": 9, "source": "NOAA"},
+    ]
+    factor = _assess_scheduled(
+        events=[_gst(readings)], weather_status=_p1_weather_status()
+    )["factors"]["space_weather"]
+    assert factor["matched_kp_readings"] == readings[:3]
+    assert factor["effective_kp_index"] == 7
+    assert factor["factor_score"] == 0.6
+    assert factor["points"] == 6
+
+
+@pytest.mark.parametrize(
+    "bad_reading",
+    [
+        {"time": "not-a-time", "kp_index": 8, "source": "NOAA"},
+        {"time": "2026-08-25T10:01:00Z", "kp_index": "8", "source": "NOAA"},
+        {"time": "2026-08-25T10:01:00Z", "kp_index": True, "source": "NOAA"},
+        {"time": "2026-08-25T10:01:00Z", "kp_index": 10, "source": "NOAA"},
+    ],
+)
+def test_malformed_kp_reading_is_ignored_and_flagged(bad_reading):
+    valid = {"time": "2026-08-25T10:02:00Z", "kp_index": 6, "source": None}
+    result = _assess_scheduled(
+        events=[_gst([bad_reading, valid])],
+        weather_status=_p1_weather_status(),
+    )
+    factor = result["factors"]["space_weather"]
+    assert factor["matched_kp_readings"] == [valid]
+    assert factor["effective_kp_index"] == 6
+    assert factor["points"] == 4
+    assert factor["status"] == "PARTIAL"
+    assert "INVALID_KP_READING" in result["reason_codes"]
+    assert "SPACE_WEATHER_EVENT_INVALID" in result["reason_codes"]
+
+
+def test_old_gst_without_timed_readings_remains_context_only():
+    event = {
+        "event_type": "geomagnetic_storm",
+        "event_id": "GST_OLD",
+        "start_time": "2026-08-25T10:01:00Z",
+        "max_kp_index": 9,
+        "advisory": "old fixture",
+    }
+    factor = _assess_scheduled(
+        events=[event], weather_status=_p1_weather_status()
+    )["factors"]["space_weather"]
+    assert factor["points"] == 0
+    assert factor["matched_events"] == []
+    assert factor["matched_kp_readings"] == []
+    assert factor["effective_kp_index"] is None
+    assert factor["context_events"] == [event]
+
+
+@pytest.mark.parametrize(
+    ("flare_class", "kp_index", "expected_points"),
+    [("M2.3", 8, 8), ("X1.0", 6, 10)],
+)
+def test_flare_and_gst_use_maximum_not_sum(flare_class, kp_index, expected_points):
+    storm = _gst(
+        [
+            {
+                "time": "2026-08-25T10:02:00Z",
+                "kp_index": kp_index,
+                "source": "NOAA",
+            }
+        ]
+    )
+    result = _assess_scheduled(
+        events=[_flare(flare_class), storm],
+        weather_status=_p1_weather_status(),
+    )
+    factor = result["factors"]["space_weather"]
+    assert factor["points"] == expected_points
+    assert len(factor["matched_events"]) == 2
+    assert factor["matched_kp_readings"] == storm["kp_readings"]
+    assert "SOLAR_FLARE_OVERLAP" in result["reason_codes"]
+    assert "GEOMAGNETIC_STORM_CONTACT_RELEVANT" in result["reason_codes"]
+
+
+def test_stale_gst_evidence_contributes_with_partial_quality():
+    storm = _gst(
+        [{"time": "2026-08-25T10:01:00Z", "kp_index": 7, "source": "NOAA"}]
+    )
+    result = _assess_scheduled(
+        events=[storm], weather_status=_p1_weather_status("ok", "stale")
+    )
+    factor = result["factors"]["space_weather"]
+    assert factor["status"] == "PARTIAL"
+    assert factor["points"] == 6
+    assert "SPACE_WEATHER_DATA_STALE" in result["reason_codes"]
+
+
+def test_failed_flr_does_not_block_valid_gst_evidence():
+    storm = _gst(
+        [{"time": "2026-08-25T10:01:00Z", "kp_index": 8, "source": "NOAA"}]
+    )
+    result = _assess_scheduled(
+        events=[storm], weather_status=_p1_weather_status("failed", "ok")
+    )
+    assert result["factors"]["space_weather"]["status"] == "PARTIAL"
+    assert result["factors"]["space_weather"]["points"] == 8
+    assert "SPACE_WEATHER_DATA_UNKNOWN" in result["reason_codes"]
+
+
+def test_failed_gst_does_not_block_valid_flare_evidence():
+    result = _assess_scheduled(
+        events=[_flare("M2.3")],
+        weather_status=_p1_weather_status("ok", "failed"),
+    )
+    assert result["factors"]["space_weather"]["status"] == "PARTIAL"
+    assert result["factors"]["space_weather"]["points"] == 6
+    assert "SPACE_WEATHER_DATA_UNKNOWN" in result["reason_codes"]
+
+
 # Recovery ------------------------------------------------------------------
 
 
@@ -674,6 +919,55 @@ def test_inputs_are_not_mutated_and_repeated_output_is_deterministic():
     assert first == second
 
 
+def test_timed_kp_inputs_are_not_mutated_and_output_is_deterministic():
+    storm = _gst(
+        [
+            {"time": "2026-08-25T10:01:00Z", "kp_index": 8, "source": "NOAA"},
+            {"time": "2026-08-25T10:02:00Z", "kp_index": 6, "source": None},
+        ]
+    )
+    status = _p1_weather_status("stale", "ok")
+    inputs = (
+        _visibility([_window("VW_TARGET")]),
+        _mission(),
+        _scheduled_result(),
+        {"scenario_id": SCENARIO_ID, "evidence": []},
+        [storm],
+        status,
+    )
+    originals = copy.deepcopy(inputs)
+
+    first = assess_operational_risk(
+        *inputs[:4],
+        TARGET_ID,
+        space_weather_events=inputs[4],
+        space_weather_status=inputs[5],
+    )
+    second = assess_operational_risk(
+        *inputs[:4],
+        TARGET_ID,
+        space_weather_events=inputs[4],
+        space_weather_status=inputs[5],
+    )
+
+    assert inputs == originals
+    assert first == second
+
+
+def test_operational_risk_weights_remain_exactly_approved_values():
+    factors = _assess_scheduled()["factors"]
+    assert {
+        name: factor["weight"] for name, factor in factors.items()
+    } == {
+        "scheduling_flexibility": 20,
+        "station_redundancy": 15,
+        "conflict_pressure": 25,
+        "recovery": 20,
+        "mission_priority": 10,
+        "space_weather": 10,
+    }
+
+
 def test_scenario_mismatch_fails_clearly():
     schedule = _scheduled_result()
     schedule["scenario_id"] = "OTHER"
@@ -734,6 +1028,55 @@ def test_contact_duration_mismatch_fails():
 
 
 # P1 -> P2 integration style ------------------------------------------------
+
+
+def test_real_schedule_to_timed_p1_gst_risk_integration_is_deterministic():
+    visibility_data = _visibility([_window("VW_TARGET")])
+    mission_data = _mission()
+    schedule = solve_schedule(visibility_data, mission_data, deterministic=True)
+    evidence = build_conflict_evidence(visibility_data, mission_data, schedule)
+    weather = {
+        "events": [
+            _gst(
+                [
+                    {
+                        "time": "2026-08-25T10:01:00Z",
+                        "kp_index": 8,
+                        "source": "NOAA",
+                    }
+                ]
+            )
+        ],
+        "fetch_status": _p1_weather_status(),
+    }
+
+    first = assess_operational_risk(
+        visibility_data,
+        mission_data,
+        schedule,
+        evidence,
+        TARGET_ID,
+        space_weather_events=weather["events"],
+        space_weather_status=weather["fetch_status"],
+    )
+    second = assess_operational_risk(
+        visibility_data,
+        mission_data,
+        schedule,
+        evidence,
+        TARGET_ID,
+        space_weather_events=weather["events"],
+        space_weather_status=weather["fetch_status"],
+    )
+
+    assert schedule["scheduled_contacts"][0]["request_id"] == TARGET_ID
+    assert first["schedule_status"] == "SCHEDULED"
+    assert first["factors"]["space_weather"]["points"] == 8
+    assert first["factors"]["space_weather"]["effective_kp_index"] == 8
+    assert first["risk_score"] == sum(
+        factor["points"] for factor in first["factors"].values()
+    )
+    assert first == second
 
 
 def test_p1_p2_schedule_conflicts_alternatives_weather_risk_integration():
