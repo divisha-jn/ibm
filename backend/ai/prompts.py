@@ -185,3 +185,118 @@ def build_what_if_outcome_messages(
             ),
         },
     ]
+
+RISK_EXPLAIN_SYSTEM_PROMPT = """You are Mission Ops Copilot, an AI assistant for satellite
+mission scheduling.
+
+The deterministic solver has computed an Operational Risk Index (0–100) for one
+scheduled contact. Your job is to translate that score and its factor breakdown
+into a concise operational narrative for the mission controller.
+
+Structure your response in plain prose (4–6 sentences) covering:
+1. The overall risk level (LOW / MEDIUM / HIGH) and what it means operationally.
+2. Which factors are contributing the most points — name them in plain language,
+   not code names (e.g. "only one viable ground station" not "SINGLE_USABLE_STATION").
+3. What the operator should watch for or be aware of given this score.
+
+GROUNDING RULES:
+1. Use ONLY the score, level, factor points, reason codes, and metrics supplied.
+2. Never invent a number, station ID, request ID, or event that is not in the evidence.
+3. Preserve all identifiers and numerical values exactly as they appear.
+4. Be concise and operational — write for a mission controller, not a general audience.
+5. Do not mention that you are an AI unless asked.
+6. Do not suggest actions to reduce risk here — that is handled separately by the
+   alternatives engine.
+
+Return plain natural-language prose, not JSON.
+"""
+
+ALTERNATIVES_EXPLAIN_SYSTEM_PROMPT = """You are Mission Ops Copilot, an AI assistant for
+satellite mission scheduling.
+
+The solver has found ranked alternative scheduling windows for one unscheduled request.
+Your job is to explain these options to the operator so they can decide what to do.
+
+Structure your response in plain prose (3–5 sentences) covering:
+1. Why the request is currently unscheduled (from the reason codes).
+2. What the best alternative window offers — when it is and at which station.
+3. What it costs operationally: which requests get displaced or rescheduled, and
+   whether that trade-off is worth it.
+4. If multiple alternatives exist, briefly note how they differ.
+5. If no alternatives are available, explain what that means for recovery options.
+
+GROUNDING RULES:
+1. Use ONLY the alternatives data supplied — window IDs, station IDs, start/end times,
+   displaced request IDs, rescheduled request IDs, and reason codes.
+2. Never invent a window, station, request, or time that is not in the evidence.
+3. Preserve all identifiers and numerical values exactly as they appear.
+4. Be concise and operational — write for a mission controller, not a general audience.
+5. Do not mention that you are an AI unless asked.
+
+Return plain natural-language prose, not JSON.
+"""
+
+
+def build_risk_explain_messages(
+    risk_result: dict,
+) -> list[dict[str, str]]:
+    """Build Granite messages to narrate a completed risk assessment."""
+    import json
+
+    context = {
+        "request_id": risk_result.get("request_id"),
+        "satellite_id": risk_result.get("satellite_id"),
+        "schedule_status": risk_result.get("schedule_status"),
+        "risk_score": risk_result.get("risk_score"),
+        "risk_level": risk_result.get("risk_level"),
+        "reason_codes": risk_result.get("reason_codes", []),
+        "factors": {
+            name: {
+                "weight": factor.get("weight"),
+                "points": factor.get("points"),
+                "factor_score": factor.get("factor_score"),
+                "metrics": factor.get("metrics"),
+                **({"state": factor["state"]} if "state" in factor else {}),
+            }
+            for name, factor in risk_result.get("factors", {}).items()
+        },
+        "data_quality": risk_result.get("data_quality"),
+        "contact": risk_result.get("contact"),
+    }
+
+    return [
+        {"role": "system", "content": RISK_EXPLAIN_SYSTEM_PROMPT},
+        {
+            "role": "user",
+            "content": (
+                "Explain this operational risk assessment to the mission controller:\n\n"
+                + json.dumps(context, indent=2)
+            ),
+        },
+    ]
+
+
+def build_alternatives_explain_messages(
+    alternatives_result: dict,
+) -> list[dict[str, str]]:
+    """Build Granite messages to narrate ranked alternative windows."""
+    import json
+
+    context = {
+        "request_id": alternatives_result.get("request_id"),
+        "satellite_id": alternatives_result.get("satellite_id"),
+        "status": alternatives_result.get("status"),
+        "reason_codes": alternatives_result.get("reason_codes", []),
+        "alternatives": alternatives_result.get("alternatives", []),
+    }
+
+    return [
+        {"role": "system", "content": ALTERNATIVES_EXPLAIN_SYSTEM_PROMPT},
+        {
+            "role": "user",
+            "content": (
+                "Explain these alternative scheduling options to the mission controller:\n\n"
+                + json.dumps(context, indent=2)
+            ),
+        },
+    ]

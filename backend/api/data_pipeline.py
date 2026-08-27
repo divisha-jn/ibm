@@ -370,6 +370,84 @@ def build_live_alternatives(
         return None
 
 
+def build_live_risk(
+    schedule_result: dict,
+    conflict_evidence: dict,
+    request_id: str,
+    *,
+    visibility_data: Optional[dict] = None,
+    mission_data: Optional[dict] = None,
+    include_weather: bool = True,
+) -> Optional[dict]:
+    """
+    Run P2's assess_operational_risk() for one request and return the result.
+
+    Fetches space-weather from NASA DONKI when include_weather=True (default).
+    Pass include_weather=False to skip the DONKI call and keep the response fast.
+
+    Returns a risk assessment dict, or None on any failure.
+    """
+    if not _ortools_available():
+        return None
+
+    try:
+        from backend.solver.risk import assess_operational_risk
+        if visibility_data is None:
+            visibility_data = _get_visibility_data()
+        if mission_data is None:
+            mission_data = _load_mission_requests()
+
+        space_weather_events: list = []
+        space_weather_status: dict | None = None
+
+        if include_weather:
+            try:
+                from backend.data.space_weather import fetch_space_weather_events
+                planning_horizon = visibility_data.get("planning_horizon", {})
+                start_str = planning_horizon.get("start", "")[:10]
+                end_str = planning_horizon.get("end", "")[:10]
+                if start_str and end_str:
+                    weather = fetch_space_weather_events(start_str, end_str)
+                    space_weather_events = weather.get("events", [])
+                    space_weather_status = {"FLR": weather["fetch_status"].get("FLR", "failed"),
+                                            "GST": weather["fetch_status"].get("GST", "failed")}
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Space weather fetch failed (%s) — proceeding without it.", exc)
+
+        # Build alternatives so the recovery factor is populated
+        alternatives_result: dict | None = None
+        try:
+            from backend.solver.alternatives import rank_alternatives
+            alternatives_result = rank_alternatives(
+                visibility_data,
+                mission_data,
+                schedule_result,
+                conflict_evidence,
+                request_id,
+                limit=3,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "rank_alternatives failed for %r during risk assessment (%s) — "
+                "recovery factor will be UNKNOWN.",
+                request_id, exc,
+            )
+
+        return assess_operational_risk(
+            visibility_data,
+            mission_data,
+            schedule_result,
+            conflict_evidence,
+            request_id,
+            space_weather_events=space_weather_events,
+            space_weather_status=space_weather_status,
+            alternatives_result=alternatives_result,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.error("build_live_risk failed for %r: %s", request_id, exc, exc_info=True)
+        return None
+
+
 def build_live_what_if_schedule(
     modified_mission_data: dict,
 ) -> Optional[dict]:

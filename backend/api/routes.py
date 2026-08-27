@@ -12,6 +12,8 @@ from backend.api.schemas import (
     ApplyWhatIfResponse,
     AlternativesRequest,
     AlternativesResponse,
+    RiskRequest,
+    RiskResponse,
     ScheduleResult,
 )
 from backend.api.what_if import (
@@ -23,6 +25,7 @@ from backend.api.data_pipeline import (
     build_live_schedule,
     build_live_conflict_evidence,
     build_live_alternatives,
+    build_live_risk,
 )
 
 logger = logging.getLogger(__name__)
@@ -277,7 +280,68 @@ def get_alternatives(request: AlternativesRequest):
             request_id=request.request_id,
             status="PIPELINE_UNAVAILABLE",
         )
-    return result
+
+    # Ask Granite to narrate the alternatives — falls back gracefully if unavailable
+    explanation: str | None = None
+    try:
+        from backend.ai.explain import explain_alternatives
+        explanation = explain_alternatives(result)
+    except Exception as exc:  # noqa: BLE001
+        logger.info("Granite explain_alternatives unavailable (%s) — omitting narrative.", exc)
+
+    return AlternativesResponse(**result, explanation=explanation)
+
+
+@router.post("/risk", response_model=RiskResponse)
+def get_risk(request: RiskRequest):
+    """
+    Returns the Operational Risk Index (0–100) for one request plus a
+    Granite narrative explaining the score in plain language.
+
+    Score and level are computed entirely by the deterministic solver
+    (assess_operational_risk). Granite only narrates — it never influences
+    the calculation.
+
+    Falls back to PIPELINE_UNAVAILABLE (HTTP 200) when ortools is unavailable
+    or any pipeline step fails.
+    """
+    schedule = build_live_schedule()
+    evidence = build_live_conflict_evidence(schedule) if schedule is not None else None
+
+    if schedule is None or evidence is None:
+        return RiskResponse(
+            scenario_id=request.scenario_id,
+            request_id=request.request_id,
+            satellite_id="UNKNOWN",
+            schedule_status="UNKNOWN",
+            assessment_status="PIPELINE_UNAVAILABLE",
+        )
+
+    risk_result = build_live_risk(
+        schedule,
+        evidence,
+        request.request_id,
+        include_weather=request.include_weather,
+    )
+
+    if risk_result is None:
+        return RiskResponse(
+            scenario_id=request.scenario_id,
+            request_id=request.request_id,
+            satellite_id="UNKNOWN",
+            schedule_status="UNKNOWN",
+            assessment_status="PIPELINE_UNAVAILABLE",
+        )
+
+    # Ask Granite to narrate the risk assessment — falls back gracefully
+    narrative: str | None = None
+    try:
+        from backend.ai.explain import explain_risk
+        narrative = explain_risk(risk_result)
+    except Exception as exc:  # noqa: BLE001
+        logger.info("Granite explain_risk unavailable (%s) — omitting narrative.", exc)
+
+    return RiskResponse(**risk_result, narrative=narrative)
 
 
 @router.post("/what-if", response_model=WhatIfResponse)

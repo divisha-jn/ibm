@@ -2,7 +2,13 @@
 
 import { useState, useEffect, useRef } from "react";
 import styles from "./WhatIfChat.module.css";
-import { fetchWhatIf, fetchExplanation, WhatIfResponse } from "../lib/api";
+import {
+  fetchWhatIf,
+  fetchExplanation,
+  fetchChatHistory,
+  saveChatTurn,
+  WhatIfResponse,
+} from "../lib/api";
 import { Mission } from "../data/mockMissions";
 
 const SCHEDULED_SUGGESTIONS = [
@@ -50,20 +56,51 @@ interface Props {
   selectedMission: Mission | null;
 }
 
+// sessionId is stable for the lifetime of a (scenario × mission) pair.
+// Stored in localStorage so it survives page refresh.
+function getSessionId(scenarioId: string, missionId: string | null): string {
+  const key = `chat_session__${scenarioId}__${missionId ?? "global"}`;
+  if (typeof window === "undefined") return key;
+  let id = localStorage.getItem(key);
+  if (!id) {
+    id = key;
+    localStorage.setItem(key, id);
+  }
+  return id;
+}
+
 export default function WhatIfChat({ scenarioId, selectedMission }: Props) {
   const [input, setInput] = useState("");
   const [turns, setTurns] = useState<ChatTurn[]>([]);
   const [loading, setLoading] = useState(false);
   const prevMissionId = useRef<string | null>(null);
 
-  // When a new mission is selected, clear the chat so context is fresh
+  // Compute the stable session key for the current (scenario × mission) pair
+  const sessionId = getSessionId(scenarioId, selectedMission?.mission_id ?? null);
+
+  // When mission changes: clear UI state and load history for the new session
   useEffect(() => {
     if (selectedMission?.mission_id !== prevMissionId.current) {
       prevMissionId.current = selectedMission?.mission_id ?? null;
       setTurns([]);
       setInput("");
     }
-  }, [selectedMission]);
+
+    // Load persisted history for this session
+    fetchChatHistory(sessionId).then((history) => {
+      if (history.length === 0) return;
+      setTurns(
+        history.map((t) => ({
+          query: t.query,
+          type: t.type as "explain" | "whatif",
+          explanation: t.explanation,
+          response: t.whatif_response as WhatIfResponse | null,
+          error: t.error,
+        }))
+      );
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedMission, sessionId]);
 
   async function handleSend(query?: string) {
     const q = (query ?? input).trim();
@@ -85,6 +122,7 @@ export default function WhatIfChat({ scenarioId, selectedMission }: Props) {
           copy[copy.length - 1] = { query: q, response, explanation: null, error: null, type: "whatif" };
           return copy;
         });
+        saveChatTurn(sessionId, q, "whatif", null, response, null);
       } else {
         // Route to /explain — carry the selected request as context
         const explanation = await fetchExplanation(scenarioId, selectedMission.mission_id, q);
@@ -93,16 +131,19 @@ export default function WhatIfChat({ scenarioId, selectedMission }: Props) {
           copy[copy.length - 1] = { query: q, response: null, explanation, error: null, type: "explain" };
           return copy;
         });
+        saveChatTurn(sessionId, q, "explain", explanation, null, null);
       }
     } catch (err) {
+      const errorMsg = "Failed to reach the backend — is it running?";
       setTurns((prev) => {
         const copy = [...prev];
         copy[copy.length - 1] = {
           ...copy[copy.length - 1],
-          error: "Failed to reach the backend — is it running?",
+          error: errorMsg,
         };
         return copy;
       });
+      saveChatTurn(sessionId, q, isWhatIfQuestion(q) ? "whatif" : "explain", null, null, errorMsg);
     } finally {
       setLoading(false);
     }

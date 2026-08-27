@@ -168,3 +168,54 @@ class AlternativesResponse(BaseModel):
     status: str
     reason_codes: List[str] = []
     alternatives: List[AlternativeWindow] = []
+    explanation: Optional[str] = None  # Granite narrative; None when Granite unavailable
+
+# ---------------------------------------------------------------------------
+# Contract #9 — operational risk  (P3 → P4/P5)
+# One request per call. Score + level come from the deterministic solver;
+# Granite only narrates — it never touches the formula.
+# ---------------------------------------------------------------------------
+
+class RiskFactorDetail(BaseModel):
+    weight: int
+    points: int
+    factor_score: float
+    metrics: Optional[Dict[str, Any]] = None
+    state: Optional[str] = None  # recovery factor only
+
+class RiskFactors(BaseModel):
+    scheduling_flexibility: RiskFactorDetail
+    station_redundancy: RiskFactorDetail
+    conflict_pressure: RiskFactorDetail
+    recovery: RiskFactorDetail
+    mission_priority: RiskFactorDetail
+    space_weather: RiskFactorDetail
+
+class RiskDataQuality(BaseModel):
+    overall: str   # COMPLETE | PARTIAL
+    space_weather: str  # COMPLETE | PARTIAL | UNAVAILABLE | UNKNOWN
+
+class RiskContact(BaseModel):
+    station_id: str
+    window_id: str
+    scheduled_start: str
+    scheduled_end: str
+
+class RiskRequest(BaseModel):
+    scenario_id: str
+    request_id: str
+    include_weather: bool = True  # set False to skip the NASA DONKI call
+
+class RiskResponse(BaseModel):
+    scenario_id: str
+    request_id: str
+    satellite_id: str
+    schedule_status: str          # SCHEDULED | UNSCHEDULED
+    assessment_status: str        # ASSESSED | UNRESOLVED
+    contact: Optional[RiskContact] = None
+    risk_score: Optional[int] = None   # 0–100; None when UNRESOLVED
+    risk_level: Optional[str] = None   # LOW | MEDIUM | HIGH; None when UNRESOLVED
+    reason_codes: List[str] = []
+    factors: Optional[RiskFactors] = None
+    data_quality: Optional[RiskDataQuality] = None
+    narrative: Optional[str] = None   # Granite plain-language explanation; None when Granite unavailable

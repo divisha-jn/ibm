@@ -4,7 +4,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from .prompts import build_explain_messages, build_what_if_outcome_messages
+from .prompts import (
+    build_explain_messages,
+    build_what_if_outcome_messages,
+    build_risk_explain_messages,
+    build_alternatives_explain_messages,
+)
 
 if TYPE_CHECKING:
     from .granite import GraniteClient
@@ -81,6 +86,68 @@ def explain_outcome(
 
     return client.chat(
         build_what_if_outcome_messages(operations, base_schedule, new_schedule),
+        max_completion_tokens=350,
+        temperature=0.0,
+    )
+
+
+def explain_risk(
+    risk_result: dict,
+    *,
+    client: "GraniteClient | None" = None,
+) -> str:
+    """Generate a natural-language narrative for a completed risk assessment.
+
+    Granite receives only the already-computed score, level, factor breakdown,
+    and reason codes — it never performs or influences the calculation itself.
+
+    Args:
+        risk_result: The dict returned by assess_operational_risk().
+        client:      Optional pre-built GraniteClient (useful in tests).
+    """
+    if not isinstance(risk_result, dict):
+        raise TypeError("risk_result must be a dictionary")
+    if risk_result.get("assessment_status") not in ("ASSESSED", "UNRESOLVED"):
+        raise ValueError(
+            "risk_result must have assessment_status ASSESSED or UNRESOLVED."
+        )
+
+    if client is None:
+        from .granite import GraniteClient
+        client = GraniteClient()
+
+    return client.chat(
+        build_risk_explain_messages(risk_result),
+        max_completion_tokens=350,
+        temperature=0.0,
+    )
+
+
+def explain_alternatives(
+    alternatives_result: dict,
+    *,
+    client: "GraniteClient | None" = None,
+) -> str:
+    """Generate a natural-language explanation for ranked alternative windows.
+
+    Granite explains what the alternatives cost operationally and which one
+    the operator should consider — grounded entirely in the solver output.
+
+    Args:
+        alternatives_result: The dict returned by rank_alternatives().
+        client:              Optional pre-built GraniteClient (useful in tests).
+    """
+    if not isinstance(alternatives_result, dict):
+        raise TypeError("alternatives_result must be a dictionary")
+    if "status" not in alternatives_result:
+        raise ValueError("alternatives_result must contain a 'status' field.")
+
+    if client is None:
+        from .granite import GraniteClient
+        client = GraniteClient()
+
+    return client.chat(
+        build_alternatives_explain_messages(alternatives_result),
         max_completion_tokens=350,
         temperature=0.0,
     )

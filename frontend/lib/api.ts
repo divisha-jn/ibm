@@ -65,3 +65,49 @@ export async function fetchWhatIf(
   if (!res.ok) throw new Error(`What-if request failed: ${res.status}`);
   return res.json();
 }
+
+// ---------------------------------------------------------------------------
+// Chat history — SQLite persistence
+// ---------------------------------------------------------------------------
+
+export interface ChatTurnOut {
+  query: string;
+  type: "explain" | "whatif";
+  explanation: string | null;
+  whatif_response: WhatIfResponse | null;
+  error: string | null;
+  created_at: string;
+}
+
+export async function fetchChatHistory(sessionId: string): Promise<ChatTurnOut[]> {
+  const res = await fetch(`${API_BASE}/chat/history/${encodeURIComponent(sessionId)}`);
+  if (!res.ok) return [];           // silently return empty on any failure
+  const data = await res.json();
+  return data.turns ?? [];
+}
+
+export async function saveChatTurn(
+  sessionId: string,
+  query: string,
+  type: "explain" | "whatif",
+  explanation: string | null,
+  whatifResponse: WhatIfResponse | null,
+  error: string | null,
+): Promise<void> {
+  try {
+    await fetch(`${API_BASE}/chat/history`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        session_id: sessionId,
+        query,
+        type,
+        explanation,
+        whatif_response: whatifResponse,
+        error,
+      }),
+    });
+  } catch {
+    // persistence failure is non-fatal — chat still works in-session
+  }
+}
