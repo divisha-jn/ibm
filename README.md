@@ -48,7 +48,7 @@ through `data_pipeline.py`'s cached path) — only `run_scheduling()` from the
 same module is still exercised, by `backend/tests/test_backend_scheduling.py`
 and `backend/tests/test_conflict_explanation_integration.py`.
 
-## Demo scenario: antenna resource conflict
+## Demo scenarios
 
 Real orbital passes aren't predictable on demand, so there's no way to make
 `GET /schedule` naturally reproduce a specific conflict just by waiting.
@@ -56,19 +56,31 @@ Instead, `backend/data/demo_scenarios.py` seeds the live app with a fixed,
 already-unit-tested scenario:
 
 ```bash
-python -m backend.data.demo_scenarios
+python -m backend.data.demo_scenarios [antenna_conflict | ranked_alternatives]
 ```
 
-This overwrites `data/mission_requests.json` and
-`backend/data/generated/visibility_windows_scheduler.json` with two
-requests contending for the same ground station at the same time.
+Defaults to `antenna_conflict` if no name is given. Both overwrite
+`data/mission_requests.json` and
+`backend/data/generated/visibility_windows_scheduler.json`; both require
+`ortools` (Python ≤3.12 — see [Loading / timeout expectations](docs/api_contracts.md))
+on whichever endpoint you hit, otherwise you'll get the hardcoded/mock
+fallback instead of the seeded scenario.
 
-**Then hit:** `GET /api/v1/schedule` (requires `ortools`, i.e. Python ≤3.12
-— see [Loading / timeout expectations](docs/api_contracts.md) — otherwise
-you'll get the hardcoded stub instead of this scenario).
+**Restore the default demo data** afterwards with:
+```bash
+git checkout -- data/mission_requests.json
+```
+(the visibility cache file is gitignored — it's just overwritten again the
+next time `/schedule` regenerates it from real orbital data).
 
-**Expected response** (abridged — full shape is the normal `ScheduleResult`
-contract, see `docs/api_contracts.md`):
+### `antenna_conflict` — a straight priority conflict, no alternative
+
+Two requests contend for the same ground station at the same time; only
+the higher-priority one can be scheduled, and there's no other window for
+the loser to move to.
+
+**Then hit:** `GET /api/v1/schedule`
+
 ```json
 {
   "scheduled_contacts": [
@@ -85,17 +97,59 @@ contract, see `docs/api_contracts.md`):
 }
 ```
 
-**Restore the default demo data** afterwards with:
-```bash
-git checkout -- data/mission_requests.json
-```
-(the visibility cache file is gitignored — it's just overwritten again the
-next time `/schedule` regenerates it from real orbital data).
+`POST /api/v1/alternatives {"scenario_id": "LIVE_CONFLICT_ENRICHMENT", "request_id": "REQ_LOW_PRIORITY"}`
+returns `status: "NO_FEASIBLE_ALTERNATIVES"` — there genuinely isn't another
+window, so this scenario is not useful for testing the ranked-alternatives
+UI. Use `ranked_alternatives` for that.
 
-**Single source of truth:** the scenario data lives in
-`backend/data/demo_scenarios.py::antenna_conflict_scenario()`, which
-`backend/tests/test_data_pipeline.py`'s
-`test_schedule_enriches_station_conflict_from_same_p2_inputs` imports and
-asserts against directly — the seed script and the pytest fixture are
-reading the exact same function, not hand-copied duplicates, so they can't
-drift apart.
+**Single source of truth:** `backend/data/demo_scenarios.py::antenna_conflict_scenario()`,
+imported directly by `backend/tests/test_data_pipeline.py`'s
+`test_schedule_enriches_station_conflict_from_same_p2_inputs`.
+
+### `ranked_alternatives` — a real alternative exists, at a displacement cost
+
+A high-priority request needs a full 20-minute pass, but a lower-priority
+pair already splits that same station-time slot into two 10-minute
+contacts whose *combined* priority outweighs the high-priority request's
+alone — so the solver schedules the pair instead. Unlike `antenna_conflict`,
+the loser here does have one other viable window: the full slot, at the
+cost of displacing both current holders.
+
+**Then hit:** `GET /api/v1/schedule`
+
+```json
+{
+  "scheduled_contacts": [
+    { "request_id": "REQ_LOWER_A", "priority": 4, "...": "..." },
+    { "request_id": "REQ_LOWER_B", "priority": 4, "...": "..." }
+  ],
+  "unscheduled_requests": [
+    {
+      "request_id": "REQ_ALT_TARGET",
+      "priority": 6,
+      "reason_codes": ["ANTENNA_RESOURCE_CONFLICT"],
+      "conflicts": ["...", "..."]
+    }
+  ]
+}
+```
+
+**Then hit** `POST /api/v1/alternatives {"scenario_id": "P2_ALTERNATIVES_TEST", "request_id": "REQ_ALT_TARGET"}`:
+
+```json
+{
+  "status": "ALTERNATIVES_FOUND",
+  "alternatives": [
+    {
+      "rank": 1,
+      "window_id": "VW_TARGET_LONG",
+      "displaced_request_ids": ["REQ_LOWER_A", "REQ_LOWER_B"],
+      "ranking_metrics": { "displaced_count": 2, "displaced_priority_total": 8, "...": "..." }
+    }
+  ]
+}
+```
+
+**Single source of truth:** `backend/data/demo_scenarios.py::ranked_alternatives_scenario()`,
+imported directly by `backend/tests/test_alternatives.py`'s
+`test_real_p2_schedule_evidence_and_alternatives_integration`.

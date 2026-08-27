@@ -3,6 +3,7 @@ from datetime import datetime
 
 import pytest
 
+from backend.data.demo_scenarios import ranked_alternatives_scenario
 from backend.solver.alternatives import (
     ALTERNATIVES_FOUND,
     NO_FEASIBLE_ALTERNATIVES,
@@ -604,54 +605,12 @@ def test_full_visibility_not_evidence_hint_is_candidate_source():
 
 
 def test_real_p2_schedule_evidence_and_alternatives_integration():
+    # Single source of truth: backend/data/demo_scenarios.py. The live-API
+    # seed script (`python -m backend.data.demo_scenarios ranked_alternatives`)
+    # reuses the exact same data so the two can't drift apart.
     lower_a_id = "REQ_LOWER_A"
     lower_b_id = "REQ_LOWER_B"
-    visibility_data = _visibility([
-        _window(
-            "VW_TARGET_LONG",
-            TARGET_SATELLITE_ID,
-            "GS_1",
-            "2026-08-24T10:00:00Z",
-            "2026-08-24T10:20:00Z",
-        ),
-        _window(
-            "VW_LOWER_A",
-            "NORAD_20005",
-            "GS_1",
-            "2026-08-24T10:00:00Z",
-            "2026-08-24T10:10:00Z",
-        ),
-        _window(
-            "VW_LOWER_B",
-            "NORAD_20006",
-            "GS_1",
-            "2026-08-24T10:10:00Z",
-            "2026-08-24T10:20:00Z",
-        ),
-    ])
-    mission_data = _mission([
-        _request(
-            TARGET_ID,
-            TARGET_SATELLITE_ID,
-            6,
-            ["GS_1"],
-            required_contact_seconds=1200,
-        ),
-        _request(
-            lower_a_id,
-            "NORAD_20005",
-            4,
-            ["GS_1"],
-            required_contact_seconds=600,
-        ),
-        _request(
-            lower_b_id,
-            "NORAD_20006",
-            4,
-            ["GS_1"],
-            required_contact_seconds=600,
-        ),
-    ])
+    visibility_data, mission_data = ranked_alternatives_scenario()
 
     baseline = solve_schedule(visibility_data, mission_data, deterministic=True)
     evidence = build_conflict_evidence(visibility_data, mission_data, baseline)

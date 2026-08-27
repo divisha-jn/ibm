@@ -33,8 +33,9 @@ def test_real_p2_conflict_evidence_flows_through_p4_to_p3():
     assert explanation == "REQ_HST_DOWNLINK lost the GS-SG conflict."
     client.chat.assert_called_once()
     messages = client.chat.call_args.args[0]
+    user_content = messages[1]["content"]
     supplied_evidence = json.loads(
-        messages[1]["content"].split("authoritative solver evidence.\n\n", 1)[1]
+        user_content[user_content.index("{"):]
     )
     assert supplied_evidence == {
         "scenario_id": "P2_REALISTIC_INTEGRATION_001",

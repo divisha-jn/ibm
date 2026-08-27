@@ -196,10 +196,9 @@ def test_live_explain_selects_target_from_real_p2_evidence(monkeypatch, tmp_path
         "max_completion_tokens": 300,
         "temperature": 0.0,
     }
+    user_content = ai_call["messages"][1]["content"]
     supplied_evidence = json.loads(
-        ai_call["messages"][1]["content"].split(
-            "authoritative solver evidence.\n\n", 1
-        )[1]
+        user_content[user_content.index("{"):]
     )
     assert supplied_evidence["scenario_id"] == mission_data["scenario_id"]
     assert len(supplied_evidence["evidence"]) == 1
