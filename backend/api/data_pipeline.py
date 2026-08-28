@@ -10,6 +10,7 @@ conflict evidence:
     P4: build_live_schedule()              →  called from GET /schedule
     P4: build_live_conflict_evidence()     →  called from POST /explain
     P4: build_live_alternatives()          →  called from POST /alternatives
+    P4: build_live_risk_assessment()       →  called from POST /risk
     P4: build_live_what_if_schedule()      →  called from POST /what-if
 
 Design goals
@@ -367,6 +368,81 @@ def build_live_alternatives(
         )
     except Exception as exc:  # noqa: BLE001
         logger.error("build_live_alternatives failed: %s", exc, exc_info=True)
+        return None
+
+
+def build_live_risk_assessment(
+    request_id: str,
+    *,
+    include_alternatives: bool = True,
+) -> Optional[dict]:
+    """
+    Run P2's assess_operational_risk() for one request — the Operational
+    Risk Index (contract #9, contracts/risk_assessment.example.json).
+    Deterministic and policy-defined (docs/risk_methodolgy.md), not
+    AI-generated.
+
+    assess_operational_risk() itself performs no I/O — this function
+    gathers everything it needs: the live schedule, conflict evidence, real
+    DONKI space-weather advisories over the planning horizon, and (for
+    unscheduled requests, unless include_alternatives=False) ranked
+    alternatives to feed the recovery factor.
+
+    Returns a contract #9 dict, or None on any failure — unknown
+    request_id, ortools unavailable, or any step failing all collapse to
+    None here, matching every other build_live_* function's fail-inward
+    style. The caller serves a RISK_UNAVAILABLE fallback.
+    """
+    if not _ortools_available():
+        return None
+
+    try:
+        from backend.data.space_weather import fetch_space_weather_events
+        from backend.solver.risk import assess_operational_risk
+
+        schedule = build_live_schedule()
+        if schedule is None:
+            return None
+        visibility_data = _get_visibility_data()
+        mission_data = _load_mission_requests()
+        evidence = build_live_conflict_evidence(
+            schedule, visibility_data=visibility_data, mission_data=mission_data
+        )
+        if evidence is None:
+            return None
+
+        alternatives_result = None
+        if include_alternatives:
+            is_unscheduled = any(
+                req["request_id"] == request_id
+                for req in schedule.get("unscheduled_requests", [])
+            )
+            if is_unscheduled:
+                alternatives_result = build_live_alternatives(
+                    schedule,
+                    evidence,
+                    request_id,
+                    visibility_data=visibility_data,
+                    mission_data=mission_data,
+                )
+
+        horizon = visibility_data["planning_horizon"]
+        weather = fetch_space_weather_events(
+            horizon["start"][:10], horizon["end"][:10]
+        )
+
+        return assess_operational_risk(
+            visibility_data,
+            mission_data,
+            schedule,
+            evidence,
+            request_id,
+            space_weather_events=weather["events"],
+            space_weather_status=weather["fetch_status"],
+            alternatives_result=alternatives_result,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.error("build_live_risk_assessment failed: %s", exc, exc_info=True)
         return None
 
 

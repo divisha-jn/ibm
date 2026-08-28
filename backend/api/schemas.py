@@ -168,3 +168,38 @@ class AlternativesResponse(BaseModel):
     status: str
     reason_codes: List[str] = []
     alternatives: List[AlternativeWindow] = []
+
+# ---------------------------------------------------------------------------
+# Contract #9 — operational risk index (contracts/risk_assessment.example.json).
+# P2's assess_operational_risk(): a deterministic, policy-defined 0-100 index
+# (see docs/risk_methodolgy.md) — NOT AI-generated, NOT a failure probability.
+#
+# `factors`, `data_quality`, `contact`, and `conflict_evidence` are typed
+# loosely (Dict[str, Any]) rather than as nested models: their per-factor
+# `metrics` shape differs (scheduling_flexibility vs conflict_pressure vs
+# space_weather, etc.) and assess_operational_risk() is the single source of
+# truth for that shape — see contracts/risk_assessment.example.json for a
+# full worked example. Same pattern already used for WhatIfResult.proposed_schedule.
+# ---------------------------------------------------------------------------
+
+class RiskRequest(BaseModel):
+    scenario_id: str
+    request_id: str
+    include_alternatives: bool = True  # compute recovery-factor alternatives for unscheduled requests
+
+class RiskResponse(BaseModel):
+    scenario_id: str
+    request_id: str
+    satellite_id: Optional[str] = None
+    schedule_status: str    # "SCHEDULED" | "UNSCHEDULED" | "UNKNOWN" (P4 fallback)
+    # ASSESSED | UNRESOLVED | RISK_UNAVAILABLE (P4 app-level fallback — ortools
+    # down, unknown request_id, or any step failed; same fail-inward-with-200
+    # convention as /schedule, /explain, /alternatives)
+    assessment_status: str
+    contact: Optional[Dict[str, Any]] = None
+    risk_score: Optional[int] = None       # 0-100, only when schedule_status == SCHEDULED
+    risk_level: Optional[str] = None       # LOW | MEDIUM | HIGH, only when scored
+    reason_codes: List[str] = []
+    factors: Dict[str, Any] = {}
+    data_quality: Dict[str, Any] = {}
+    conflict_evidence: Optional[Dict[str, Any]] = None  # only present when UNSCHEDULED
