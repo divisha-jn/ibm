@@ -1,33 +1,23 @@
 {
-  "scenario_id": "P2_ALTERNATIVES_TEST",
+  "scenario_id": "LIVE_CONFLICT_ENRICHMENT",
   "requests": [
     {
-      "request_id": "REQ_ALT_TARGET",
-      "satellite_id": "NORAD_20002",
-      "required_contact_seconds": 1200,
-      "priority": 6,
+      "request_id": "REQ_HIGH_PRIORITY",
+      "satellite_id": "NORAD_25544",
+      "required_contact_seconds": 900,
+      "priority": 9,
       "eligible_station_ids": [
-        "GS_1"
+        "GS_SG_01"
       ],
       "mandatory": false
     },
     {
-      "request_id": "REQ_LOWER_A",
-      "satellite_id": "NORAD_20005",
-      "required_contact_seconds": 600,
-      "priority": 4,
+      "request_id": "REQ_LOW_PRIORITY",
+      "satellite_id": "NORAD_48274",
+      "required_contact_seconds": 900,
+      "priority": 5,
       "eligible_station_ids": [
-        "GS_1"
-      ],
-      "mandatory": false
-    },
-    {
-      "request_id": "REQ_LOWER_B",
-      "satellite_id": "NORAD_20006",
-      "required_contact_seconds": 600,
-      "priority": 4,
-      "eligible_station_ids": [
-        "GS_1"
+        "GS_SG_01"
       ],
       "mandatory": false
     }
