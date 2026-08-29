@@ -12,6 +12,8 @@ from backend.api.schemas import (
     ApplyWhatIfResponse,
     AlternativesRequest,
     AlternativesResponse,
+    RiskRequest,
+    RiskResponse,
     ScheduleResult,
 )
 from backend.api.what_if import (
@@ -23,6 +25,7 @@ from backend.api.data_pipeline import (
     build_live_schedule,
     build_live_conflict_evidence,
     build_live_alternatives,
+    build_live_risk_assessment,
 )
 
 logger = logging.getLogger(__name__)
@@ -276,6 +279,36 @@ def get_alternatives(request: AlternativesRequest):
             scenario_id=request.scenario_id,
             request_id=request.request_id,
             status="PIPELINE_UNAVAILABLE",
+        )
+    return result
+
+
+@router.post("/risk", response_model=RiskResponse)
+def get_risk_assessment(request: RiskRequest):
+    """
+    Returns the Operational Risk Index for one request — contract #9
+    (contracts/risk_assessment.example.json). A deterministic,
+    policy-defined 0-100 index (docs/risk_methodolgy.md) — not a failure
+    probability, not AI-generated.
+
+    Gathers the live schedule, conflict evidence, real DONKI space-weather
+    advisories, and (for unscheduled requests) ranked alternatives, then
+    hands them to P2's pure assess_operational_risk().
+
+    Falls back to a RISK_UNAVAILABLE status (still HTTP 200, matching
+    /schedule, /explain, and /alternatives' fail-inward convention) when
+    ortools is unavailable, request_id is unknown, or any step fails —
+    check `assessment_status` rather than the HTTP status code.
+    """
+    result = build_live_risk_assessment(
+        request.request_id, include_alternatives=request.include_alternatives
+    )
+    if result is None:
+        return RiskResponse(
+            scenario_id=request.scenario_id,
+            request_id=request.request_id,
+            schedule_status="UNKNOWN",
+            assessment_status="RISK_UNAVAILABLE",
         )
     return result
 
