@@ -1,20 +1,34 @@
 {
-  "scenario_id": "DEMO_001",
+  "scenario_id": "P2_ALTERNATIVES_TEST",
   "requests": [
     {
-      "request_id": "REQ_001",
-      "satellite_id": "NORAD_25544",
-      "required_contact_seconds": 300,
-      "priority": 8,
-      "eligible_station_ids": ["GS_SG_01", "GS_PERTH_01"],
+      "request_id": "REQ_ALT_TARGET",
+      "satellite_id": "NORAD_20002",
+      "required_contact_seconds": 1200,
+      "priority": 6,
+      "eligible_station_ids": [
+        "GS_1"
+      ],
       "mandatory": false
     },
     {
-      "request_id": "REQ_002",
-      "satellite_id": "NORAD_48274",
-      "required_contact_seconds": 300,
-      "priority": 5,
-      "eligible_station_ids": ["GS_SG_01", "GS_PERTH_01"],
+      "request_id": "REQ_LOWER_A",
+      "satellite_id": "NORAD_20005",
+      "required_contact_seconds": 600,
+      "priority": 4,
+      "eligible_station_ids": [
+        "GS_1"
+      ],
+      "mandatory": false
+    },
+    {
+      "request_id": "REQ_LOWER_B",
+      "satellite_id": "NORAD_20006",
+      "required_contact_seconds": 600,
+      "priority": 4,
+      "eligible_station_ids": [
+        "GS_1"
+      ],
       "mandatory": false
     }
   ]

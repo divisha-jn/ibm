@@ -1,8 +1,8 @@
 "use client";
-
 import { useState } from "react";
 import MissionGantt from "../../components/MissionGantt";
 import WhatIfChat from "../../components/WhatIfChat";
+import RiskPanel from "../../components/RiskPanel";
 import { Mission } from "../../data/mockMissions";
 
 export default function DashboardPage() {
@@ -36,10 +36,13 @@ export default function DashboardPage() {
           alignItems: "start",
         }}
       >
-        <MissionGantt
-          selectedMission={selectedMission}
-          onSelectMission={setSelectedMission}
-        />
+        <div>
+          <MissionGantt
+            selectedMission={selectedMission}
+            onSelectMission={setSelectedMission}
+          />
+          <RiskPanel scenarioId="DEMO_001" selectedMission={selectedMission} />
+        </div>
         <WhatIfChat scenarioId="DEMO_001" selectedMission={selectedMission} />
       </div>
     </main>
