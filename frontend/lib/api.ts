@@ -65,3 +65,105 @@ export async function fetchWhatIf(
   if (!res.ok) throw new Error(`What-if request failed: ${res.status}`);
   return res.json();
 }
+
+export interface RankingMetrics {
+  displaced_count: number;
+  displaced_priority_total: number;
+  rescheduled_count: number;
+  rescheduled_priority_total: number;
+}
+
+export interface AlternativeWindow {
+  rank: number;
+  alternative_type: string;
+  window_id: string;
+  station_id: string;
+  scheduled_start: string;
+  scheduled_end: string;
+  duration_seconds: number;
+  displaced_request_ids: string[];
+  rescheduled_request_ids: string[];
+  ranking_metrics: RankingMetrics;
+}
+
+export interface AlternativesResponse {
+  scenario_id: string;
+  request_id: string;
+  satellite_id?: string;
+  status: string; // ALTERNATIVES_FOUND | NO_FEASIBLE_ALTERNATIVES | REQUEST_ALREADY_SCHEDULED | PIPELINE_UNAVAILABLE
+  reason_codes: string[];
+  alternatives: AlternativeWindow[];
+}
+
+export async function fetchAlternatives(
+  scenarioId: string,
+  requestId: string,
+  limit: number = 3
+): Promise<AlternativesResponse> {
+  const res = await fetch(`${API_BASE}/alternatives`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      scenario_id: scenarioId,
+      request_id: requestId,
+      limit,
+    }),
+  });
+  if (!res.ok) throw new Error(`Alternatives request failed: ${res.status}`);
+  return res.json();
+}
+
+export interface RiskFactor {
+  weight: number;
+  factor_score?: number;
+  points?: number;
+  metrics?: Record<string, any>;
+  state?: string;
+  status?: string;
+  best_alternative?: any;
+  matched_events?: any[];
+  context_events?: any[];
+  matched_kp_readings?: any[];
+  effective_kp_index?: number | null;
+}
+
+export interface RiskAssessment {
+  scenario_id: string;
+  request_id: string;
+  satellite_id?: string;
+  schedule_status: string; // SCHEDULED | UNSCHEDULED | UNKNOWN
+  assessment_status: string; // ASSESSED | UNRESOLVED | RISK_UNAVAILABLE
+  contact?: {
+    station_id: string;
+    window_id: string;
+    scheduled_start: string;
+    scheduled_end: string;
+  } | null;
+  risk_score?: number | null;
+  risk_level?: string | null;
+  reason_codes: string[];
+  factors: Record<string, RiskFactor>;
+  data_quality: {
+    overall: string;
+    space_weather?: string;
+  };
+  conflict_evidence?: Record<string, any> | null;
+}
+
+export async function fetchRiskAssessment(
+  scenarioId: string,
+  requestId: string,
+  includeAlternatives: boolean = true
+): Promise<RiskAssessment> {
+  const res = await fetch(`${API_BASE}/risk`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      scenario_id: scenarioId,
+      request_id: requestId,
+      include_alternatives: includeAlternatives,
+    }),
+  });
+  if (!res.ok) throw new Error(`Risk request failed: ${res.status}`);
+  return res.json();
+}
