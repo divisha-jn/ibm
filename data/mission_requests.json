@@ -1,24 +1,52 @@
 {
-  "scenario_id": "LIVE_CONFLICT_ENRICHMENT",
+  "scenario_id": "DEMO_001",
   "requests": [
     {
-      "request_id": "REQ_HIGH_PRIORITY",
+      "request_id": "REQ_001",
       "satellite_id": "NORAD_25544",
-      "required_contact_seconds": 900,
-      "priority": 9,
-      "eligible_station_ids": [
-        "GS_SG_01"
-      ],
+      "required_contact_seconds": 300,
+      "priority": 8,
+      "eligible_station_ids": ["GS_SG_01", "GS_PERTH_01"],
       "mandatory": false
     },
     {
-      "request_id": "REQ_LOW_PRIORITY",
-      "satellite_id": "NORAD_48274",
-      "required_contact_seconds": 900,
-      "priority": 5,
-      "eligible_station_ids": [
-        "GS_SG_01"
-      ],
+      "request_id": "REQ_002",
+      "satellite_id": "NORAD_33591",
+      "required_contact_seconds": 620,
+      "priority": 9,
+      "eligible_station_ids": ["GS_SG_01"],
+      "mandatory": false
+    },
+    {
+      "request_id": "REQ_003",
+      "satellite_id": "NORAD_33591",
+      "required_contact_seconds": 620,
+      "priority": 7,
+      "eligible_station_ids": ["GS_SG_01"],
+      "mandatory": false
+    },
+    {
+      "request_id": "REQ_004",
+      "satellite_id": "NORAD_33591",
+      "required_contact_seconds": 620,
+      "priority": 7,
+      "eligible_station_ids": ["GS_SG_01"],
+      "mandatory": false
+    },
+    {
+      "request_id": "REQ_005",
+      "satellite_id": "NORAD_33591",
+      "required_contact_seconds": 620,
+      "priority": 7,
+      "eligible_station_ids": ["GS_SG_01"],
+      "mandatory": false
+    },
+    {
+      "request_id": "REQ_006",
+      "satellite_id": "NORAD_27424",
+      "required_contact_seconds": 1200,
+      "priority": 4,
+      "eligible_station_ids": ["GS_SG_01", "GS_PERTH_01"],
       "mandatory": false
     }
   ]
