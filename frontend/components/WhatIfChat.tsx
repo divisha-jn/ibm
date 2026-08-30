@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import styles from "./WhatIfChat.module.css";
-import { fetchWhatIf, fetchExplanation, fetchAlternatives, WhatIfResponse, AlternativesResponse } from "../lib/api";
+import { fetchWhatIf, fetchExplanation, fetchAlternatives, fetchChatHistory, saveChatTurn, WhatIfResponse, AlternativesResponse } from "../lib/api";
 import { Mission } from "../data/mockMissions";
 
 
@@ -89,9 +89,10 @@ export default function WhatIfChat({ scenarioId, selectedMission }: Props) {
       setTurns(
         history.map((t) => ({
           query: t.query,
-          type: t.type as "explain" | "whatif",
+          type: t.type as "explain" | "whatif" | "alternatives",
           explanation: t.explanation,
           response: t.whatif_response as WhatIfResponse | null,
+          alternatives: null,
           error: t.error,
         }))
       );

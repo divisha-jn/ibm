@@ -2,6 +2,56 @@ import { mapScheduleToMissions } from "./mapSchedule";
 
 const API_BASE = "http://localhost:8000/api/v1";
 
+// ---------------------------------------------------------------------------
+// Chat history persistence — backed by SQLite via POST/GET /api/v1/chat/history
+// ---------------------------------------------------------------------------
+
+export interface ChatTurnOut {
+  query: string;
+  type: string;
+  explanation: string | null;
+  whatif_response: Record<string, any> | null;
+  error: string | null;
+  created_at: string;
+}
+
+export async function fetchChatHistory(sessionId: string): Promise<ChatTurnOut[]> {
+  try {
+    const res = await fetch(`${API_BASE}/chat/history/${encodeURIComponent(sessionId)}`);
+    if (!res.ok) return [];
+    const data = await res.json();
+    return data.turns ?? [];
+  } catch {
+    return [];
+  }
+}
+
+export async function saveChatTurn(
+  sessionId: string,
+  query: string,
+  type: string,
+  explanation: string | null,
+  whatifResponse: Record<string, any> | null,
+  error: string | null
+): Promise<void> {
+  try {
+    await fetch(`${API_BASE}/chat/history`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        session_id: sessionId,
+        query,
+        type,
+        explanation,
+        whatif_response: whatifResponse,
+        error,
+      }),
+    });
+  } catch {
+    // Best-effort — never block the UI if persistence fails
+  }
+}
+
 export async function fetchExplanation(
   scenarioId: string,
   requestId: string,
