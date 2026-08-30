@@ -5,7 +5,6 @@ import styles from "./WhatIfChat.module.css";
 import { fetchWhatIf, fetchExplanation, fetchAlternatives, fetchChatHistory, saveChatTurn, WhatIfResponse, AlternativesResponse } from "../lib/api";
 import { Mission } from "../data/mockMissions";
 
-
 const SCHEDULED_SUGGESTIONS = [
   "Why was this scheduled here?",
   "Why this time slot?",
@@ -71,8 +70,8 @@ export default function WhatIfChat({ scenarioId, selectedMission }: Props) {
   const [turns, setTurns] = useState<ChatTurn[]>([]);
   const [loading, setLoading] = useState(false);
   const prevMissionId = useRef<string | null>(null);
+  const historyEndRef = useRef<HTMLDivElement>(null);
 
-  // Compute the stable session key for the current (scenario × mission) pair
   const sessionId = getSessionId(scenarioId, selectedMission?.mission_id ?? null);
 
   // When mission changes: clear UI state and load history for the new session
@@ -83,7 +82,6 @@ export default function WhatIfChat({ scenarioId, selectedMission }: Props) {
       setInput("");
     }
 
-    // Load persisted history for this session
     fetchChatHistory(sessionId).then((history) => {
       if (history.length === 0) return;
       setTurns(
@@ -100,6 +98,11 @@ export default function WhatIfChat({ scenarioId, selectedMission }: Props) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedMission, sessionId]);
 
+  // Auto-scroll to the latest message whenever the conversation updates
+  useEffect(() => {
+    historyEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [turns]);
+
   async function handleSend(query?: string) {
     const q = (query ?? input).trim();
     if (!q || loading) return;
@@ -110,7 +113,6 @@ export default function WhatIfChat({ scenarioId, selectedMission }: Props) {
 
     try {
       if (isWhatIfQuestion(q) || !selectedMission) {
-        // Route to /what-if — inject selected mission id into the query if present
         const enrichedQuery = selectedMission
           ? `[Context: selected request is ${selectedMission.mission_id}] ${q}`
           : q;
@@ -122,7 +124,6 @@ export default function WhatIfChat({ scenarioId, selectedMission }: Props) {
         });
         saveChatTurn(sessionId, q, "whatif", null, response, null);
       } else {
-        // Route to /explain — carry the selected request as context
         const explanation = await fetchExplanation(scenarioId, selectedMission.mission_id, q);
         setTurns((prev) => {
           const copy = [...prev];
@@ -147,32 +148,32 @@ export default function WhatIfChat({ scenarioId, selectedMission }: Props) {
   }
 
   async function handleAlternatives() {
-  if (!selectedMission || loading) return;
-  const q = "Show ranked alternatives";
+    if (!selectedMission || loading) return;
+    const q = "Show ranked alternatives";
 
-  setLoading(true);
-  setTurns((prev) => [
-    ...prev,
-    { query: q, response: null, explanation: null, alternatives: null, error: null, type: "alternatives" },
-  ]);
+    setLoading(true);
+    setTurns((prev) => [
+      ...prev,
+      { query: q, response: null, explanation: null, alternatives: null, error: null, type: "alternatives" },
+    ]);
 
-  try {
-    const alternatives = await fetchAlternatives(scenarioId, selectedMission.mission_id, 3);
-    setTurns((prev) => {
-      const copy = [...prev];
-      copy[copy.length - 1] = { query: q, response: null, explanation: null, alternatives, error: null, type: "alternatives" };
-      return copy;
-    });
-  } catch (err) {
-    setTurns((prev) => {
-      const copy = [...prev];
-      copy[copy.length - 1] = { ...copy[copy.length - 1], error: "Failed to fetch alternatives — is the backend running?" };
-      return copy;
-    });
-  } finally {
-    setLoading(false);
+    try {
+      const alternatives = await fetchAlternatives(scenarioId, selectedMission.mission_id, 3);
+      setTurns((prev) => {
+        const copy = [...prev];
+        copy[copy.length - 1] = { query: q, response: null, explanation: null, alternatives, error: null, type: "alternatives" };
+        return copy;
+      });
+    } catch (err) {
+      setTurns((prev) => {
+        const copy = [...prev];
+        copy[copy.length - 1] = { ...copy[copy.length - 1], error: "Failed to fetch alternatives — is the backend running?" };
+        return copy;
+      });
+    } finally {
+      setLoading(false);
+    }
   }
-}
 
   function handleKeyDown(e: React.KeyboardEvent) {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -226,7 +227,7 @@ export default function WhatIfChat({ scenarioId, selectedMission }: Props) {
         </div>
       )}
 
-      {/* Chat history */}
+      {/* Chat history — scrollable, fixed height */}
       <div className={styles.history}>
         {turns.map((turn, i) => (
           <div key={i} className={styles.turn}>
@@ -243,7 +244,6 @@ export default function WhatIfChat({ scenarioId, selectedMission }: Props) {
               </div>
             )}
 
-            {/* Explain response */}
             {turn.explanation && (
               <div className={styles.response}>
                 <div className={styles.responseLabel}>Analysis</div>
@@ -251,7 +251,6 @@ export default function WhatIfChat({ scenarioId, selectedMission }: Props) {
               </div>
             )}
 
-            {/* What-if response */}
             {turn.response && (
               <div className={styles.response}>
                 <div className={styles.responseLabel}>
@@ -278,6 +277,7 @@ export default function WhatIfChat({ scenarioId, selectedMission }: Props) {
                 )}
               </div>
             )}
+
             {turn.alternatives && (
               <div className={styles.response}>
                 <div className={styles.responseLabel}>Ranked Alternatives</div>
@@ -293,20 +293,21 @@ export default function WhatIfChat({ scenarioId, selectedMission }: Props) {
                       </div>
                     </div>
                   ))
-    ) : turn.alternatives.status === "NO_FEASIBLE_ALTERNATIVES" ? (
-      "No feasible alternative windows were found for this request."
-    ) : turn.alternatives.status === "REQUEST_ALREADY_SCHEDULED" ? (
-      "This request is already scheduled — no alternatives needed."
-    ) : (
-      "Alternatives are unavailable right now (solver pipeline inactive)."
-    )}
-  </div>
-)}
+                ) : turn.alternatives.status === "NO_FEASIBLE_ALTERNATIVES" ? (
+                  "No feasible alternative windows were found for this request."
+                ) : turn.alternatives.status === "REQUEST_ALREADY_SCHEDULED" ? (
+                  "This request is already scheduled — no alternatives needed."
+                ) : (
+                  "Alternatives are unavailable right now (solver pipeline inactive)."
+                )}
+              </div>
+            )}
           </div>
         ))}
+        <div ref={historyEndRef} />
       </div>
 
-      {/* Input row */}
+      {/* Input row — stays fixed below the scrollable history */}
       <div className={styles.inputRow}>
         <input
           className={styles.input}
