@@ -143,6 +143,12 @@ def test_what_if_solver_and_evidence_share_modified_temp_scenario(monkeypatch):
     try:
         first_response = what_if.process_what_if_query(request)
         second_response = what_if.process_what_if_query(request)
+        pending_schedules = [
+            copy.deepcopy(
+                what_if._PENDING_WHAT_IFS[response.what_if_id]["schedule"]
+            )
+            for response in (first_response, second_response)
+        ]
     finally:
         sys.setprofile(previous_profile)
         what_if._PENDING_WHAT_IFS.clear()
@@ -189,15 +195,68 @@ def test_what_if_solver_and_evidence_share_modified_temp_scenario(monkeypatch):
             "conflicting_request_priority"
         ] != 5
 
-    for response in (first_response, second_response):
+    proposed_identities = []
+    for response, pending_schedule in zip(
+        (first_response, second_response),
+        pending_schedules,
+    ):
         assert response.result is not None
         assert response.result.can_apply is True
-        assert {
+        scheduled_ids = {
             contact["request_id"]
             for contact in response.result.proposed_schedule["scheduled_contacts"]
-        } == {TARGET_REQUEST_ID}
+        }
+        assert scheduled_ids == {TARGET_REQUEST_ID}
         assert response.result.proposed_schedule["scheduled_contacts"][0][
             "priority"
         ] == 10
+
+        proposed_unscheduled = response.result.proposed_schedule[
+            "unscheduled_requests"
+        ]
+        assert len(proposed_unscheduled) == 1
+        assert proposed_unscheduled[0]["request_id"] == BASELINE_WINNER_ID
+        assert proposed_unscheduled[0]["reason_codes"] == [
+            "ANTENNA_RESOURCE_CONFLICT"
+        ]
+        assert proposed_unscheduled[0]["reason_codes"] != ["UNSCHEDULED"]
+        assert proposed_unscheduled[0]["conflicts"] == [
+            {
+                "conflicting_request_id": TARGET_REQUEST_ID,
+                "station_id": "GS_E2E_WHATIF_SHARED",
+                "overlap_start": "2026-08-24T10:00:00Z",
+                "overlap_end": "2026-08-24T10:15:00Z",
+                "overlap_seconds": 900,
+                "request_priority": 9,
+                "conflicting_request_priority": 10,
+            }
+        ]
+
+        exposed_evidence = response.result.conflict_evidence
+        assert exposed_evidence is not None
+        assert exposed_evidence["scenario_id"] == baseline_scenario["scenario_id"]
+        assert exposed_evidence["evidence"][0]["request_id"] == BASELINE_WINNER_ID
+        assert exposed_evidence["evidence"][0]["reason_codes"] == [
+            "ANTENNA_RESOURCE_CONFLICT"
+        ]
+        assert exposed_evidence["evidence"][0]["conflicts"] == (
+            proposed_unscheduled[0]["conflicts"]
+        )
+        assert response.result.model_dump()["conflict_evidence"] == exposed_evidence
+        assert pending_schedule == response.result.proposed_schedule
+        assert pending_schedule["unscheduled_requests"][0]["reason_codes"] == [
+            "ANTENNA_RESOURCE_CONFLICT"
+        ]
+        proposed_identities.append(
+            (
+                tuple(sorted(scheduled_ids)),
+                tuple(
+                    request["request_id"]
+                    for request in proposed_unscheduled
+                ),
+            )
+        )
+
+    assert proposed_identities[0] == proposed_identities[1]
 
     assert _priority(baseline_scenario, TARGET_REQUEST_ID) == 5

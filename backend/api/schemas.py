@@ -106,6 +106,7 @@ class WhatIfResult(BaseModel):
     proposed_schedule: Dict[str, Any]  # full contract #5 shape at runtime
     explanation: str
     can_apply: bool
+    conflict_evidence: Optional[Dict[str, Any]] = None
 
 class WhatIfResponse(BaseModel):
     what_if_id: str
