@@ -128,7 +128,7 @@ const isAlive = hasAnswer; // full brightness whenever we have any real answer
       )}
 
       <div className={styles.factorsGrid}>
-        {isAlive
+        {isAlive && risk!.factors
           ? Object.entries(risk!.factors).map(([key, factor]) => (
               <div key={key} className={styles.factorRow}>
                 <span className={styles.factorName}>{FACTOR_LABELS[key] ?? key}</span>
