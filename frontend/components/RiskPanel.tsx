@@ -50,20 +50,24 @@ export default function RiskPanel({ scenarioId, selectedMission }: Props) {
 
   // Decide whether we have a real score to show "alive," or should stay dimmed.
   const hasScore =
-    risk?.schedule_status === "SCHEDULED" &&
-    risk?.assessment_status === "ASSESSED" &&
-    risk?.risk_score != null;
+  risk?.schedule_status === "SCHEDULED" &&
+  risk?.assessment_status === "ASSESSED" &&
+  risk?.risk_score != null;
 
-  let dimText: string | null = dimReason;
-  if (!dimText && !loading) {
-    if (!selectedMission) dimText = "Select a mission to assess";
-    else if (risk?.assessment_status === "RISK_UNAVAILABLE") dimText = "Risk pipeline unavailable";
-    else if (risk?.assessment_status === "UNRESOLVED") dimText = "Could not be resolved";
-    else if (risk && !hasScore) dimText = `${risk.request_id} is not scheduled`;
-  }
+// "Answered" means the backend gave us a definitive result — scored or not.
+// Only truly dim when nothing's selected, still loading, or the request failed outright.
+const hasAnswer = !!risk && !loading;
 
-  const lvl = hasScore ? levelClass(risk!.risk_level) : "NoData";
-  const isAlive = hasScore && !loading;
+let dimText: string | null = dimReason;
+if (!dimText && !loading) {
+  if (!selectedMission) dimText = "Select a mission to assess";
+  else if (risk?.assessment_status === "RISK_UNAVAILABLE") dimText = "Risk pipeline unavailable";
+  else if (risk?.assessment_status === "UNRESOLVED") dimText = "Could not be resolved — not scheduled";
+  else if (risk && !hasScore) dimText = `${risk.request_id} is not scheduled`;
+}
+
+const lvl = hasScore ? levelClass(risk!.risk_level) : "NoData";
+const isAlive = hasAnswer; // full brightness whenever we have any real answer
 
   return (
     <div className={`${styles.wrapper} ${isAlive ? styles.alive : styles.dimmed}`}>
@@ -74,13 +78,13 @@ export default function RiskPanel({ scenarioId, selectedMission }: Props) {
       <div className={styles.scoreRow}>
         <div className={`${styles.scoreCircle} ${styles[`level${lvl}`]}`}>
           <span className={styles.scoreNumber}>
-            {isAlive ? risk!.risk_score : "—"}
+            {hasScore ? risk!.risk_score : "—"}
           </span>
           <span className={styles.scoreMax}>/ 100</span>
         </div>
         <div>
           <span className={`${styles.levelBadge} ${styles[`badge${lvl}`]}`}>
-            {isAlive ? `${risk!.risk_level} RISK` : "NO DATA"}
+            {hasScore ? `${risk!.risk_level} RISK` : selectedMission ? "NOT SCORED" : "NO DATA"}
           </span>
           {isAlive && risk!.contact && (
             <div className={styles.contactMeta}>
