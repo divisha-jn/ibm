@@ -179,8 +179,8 @@ class AlternativesResponse(BaseModel):
 
 class RiskFactorDetail(BaseModel):
     weight: int
-    points: int
-    factor_score: float
+    points: Optional[int] = None
+    factor_score: Optional[float] = None
     metrics: Optional[Dict[str, Any]] = None
     state: Optional[str] = None  # recovery factor only
 

@@ -279,17 +279,20 @@ export default function WhatIfChat({ scenarioId, selectedMission }: Props) {
               </div>
             )}
             {turn.alternatives && (
-  <div className={styles.response}>
-    <div className={styles.responseLabel}>Ranked Alternatives</div>
-    {turn.alternatives.status === "ALTERNATIVES_FOUND" && turn.alternatives.alternatives.length > 0 ? (
-      turn.alternatives.alternatives.map((alt) => (
-        <div key={alt.window_id} style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid #232931" }}>
-          <strong>#{alt.rank}</strong> — {alt.station_id}, {new Date(alt.scheduled_start).toISOString().slice(11, 16)}–{new Date(alt.scheduled_end).toISOString().slice(11, 16)} UTC
-          <div style={{ fontSize: 12, color: "#7c8792", marginTop: 4 }}>
-            Displaces {alt.ranking_metrics.displaced_count} mission(s), reschedules {alt.ranking_metrics.rescheduled_count}
-          </div>
-        </div>
-      ))
+              <div className={styles.response}>
+                <div className={styles.responseLabel}>Ranked Alternatives</div>
+                {turn.alternatives.explanation && (
+                  <div style={{ marginBottom: 10, color: "#e4e7eb" }}>{turn.alternatives.explanation}</div>
+                )}
+                {turn.alternatives.status === "ALTERNATIVES_FOUND" && turn.alternatives.alternatives.length > 0 ? (
+                  turn.alternatives.alternatives.map((alt) => (
+                    <div key={alt.window_id} style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid #232931" }}>
+                      <strong>#{alt.rank}</strong> — {alt.station_id}, {new Date(alt.scheduled_start).toISOString().slice(11, 16)}–{new Date(alt.scheduled_end).toISOString().slice(11, 16)} UTC
+                      <div style={{ fontSize: 12, color: "#7c8792", marginTop: 4 }}>
+                        Displaces {alt.ranking_metrics.displaced_count} mission(s), reschedules {alt.ranking_metrics.rescheduled_count}
+                      </div>
+                    </div>
+                  ))
     ) : turn.alternatives.status === "NO_FEASIBLE_ALTERNATIVES" ? (
       "No feasible alternative windows were found for this request."
     ) : turn.alternatives.status === "REQUEST_ALREADY_SCHEDULED" ? (

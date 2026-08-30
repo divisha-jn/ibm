@@ -18,4 +18,4 @@ backend/data/generated/*.json
 
 # Environment variables / secrets
 .env
-.env.*
+.env.*backend/data/chat.db*
