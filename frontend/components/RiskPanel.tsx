@@ -71,11 +71,15 @@ const isAlive = hasAnswer; // full brightness whenever we have any real answer
 
   return (
     <div className={`${styles.wrapper} ${isAlive ? styles.alive : styles.dimmed}`}>
-      <div className={styles.title}>
+       <div className={styles.title}>
         Operational Risk{risk ? ` — ${risk.request_id}` : ""}
-      </div>
+        </div>
 
-      <div className={styles.scoreRow}>
+        {isAlive && risk!.narrative && (
+        <div className={styles.narrative}>{risk!.narrative}</div>
+        )}
+
+        <div className={styles.scoreRow}>
         <div className={`${styles.scoreCircle} ${styles[`level${lvl}`]}`}>
           <span className={styles.scoreNumber}>
             {hasScore ? risk!.risk_score : "—"}
