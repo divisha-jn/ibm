@@ -201,7 +201,11 @@ def test_schedule_enriches_station_conflict_from_same_p2_inputs(monkeypatch):
     ) as real_evidence:
         result = get_schedule()
 
-    real_solver.assert_called_once_with(visibility_data, mission_data)
+    real_solver.assert_called_once_with(
+        visibility_data,
+        mission_data,
+        deterministic=True,
+    )
     real_evidence.assert_called_once()
     assert captured["visibility_data"] is visibility_data
     assert captured["mission_data"] is mission_data
@@ -260,3 +264,96 @@ def test_missing_p2_evidence_does_not_return_generic_live_result(monkeypatch):
 
     monkeypatch.setattr(routes, "build_live_schedule", lambda: None)
     assert get_schedule() is routes._STUB_SCHEDULE
+
+
+def test_live_what_if_schedule_requests_deterministic_solver(monkeypatch):
+    visibility_data, mission_data = _station_conflict_inputs()
+    monkeypatch.setattr(data_pipeline, "_ortools_available", lambda: True)
+    monkeypatch.setattr(
+        data_pipeline,
+        "_get_visibility_data",
+        lambda: visibility_data,
+    )
+
+    with patch(
+        "backend.solver.scheduler.solve_schedule",
+        wraps=solve_schedule,
+    ) as real_solver:
+        result = data_pipeline.build_live_what_if_schedule(mission_data)
+
+    real_solver.assert_called_once_with(
+        visibility_data,
+        mission_data,
+        deterministic=True,
+    )
+    assert result is not None
+    assert result["solver"]["status"] in {"OPTIMAL", "FEASIBLE"}
+
+
+def test_repeated_live_schedules_keep_equal_priority_request_identity_stable(
+    monkeypatch,
+):
+    visibility_data = {
+        "planning_horizon": {
+            "start": "2026-08-24T00:00:00Z",
+            "end": "2026-08-25T00:00:00Z",
+        },
+        "minimum_elevation_deg": 10.0,
+        "visibility_windows": [
+            {
+                "window_id": "VW_DETERMINISTIC_SHARED",
+                "satellite_id": "NORAD_93001",
+                "station_id": "GS_DETERMINISTIC_SHARED",
+                "aos": "2026-08-24T10:00:00Z",
+                "los": "2026-08-24T10:15:00Z",
+                "duration_seconds": 900,
+                "max_elevation_deg": 40.0,
+            }
+        ],
+    }
+    mission_data = {
+        "scenario_id": "DETERMINISTIC_API_IDENTITY",
+        "requests": [
+            {
+                "request_id": request_id,
+                "satellite_id": "NORAD_93001",
+                "required_contact_seconds": 900,
+                "priority": 7,
+                "eligible_station_ids": ["GS_DETERMINISTIC_SHARED"],
+                "mandatory": False,
+            }
+            for request_id in ("REQ_TIE_001", "REQ_TIE_002", "REQ_TIE_003")
+        ],
+    }
+    monkeypatch.setattr(data_pipeline, "_ortools_available", lambda: True)
+    monkeypatch.setattr(
+        data_pipeline,
+        "_get_visibility_data",
+        lambda: visibility_data,
+    )
+    monkeypatch.setattr(
+        data_pipeline,
+        "_load_mission_requests",
+        lambda: mission_data,
+    )
+
+    identities = []
+    for _ in range(5):
+        result = data_pipeline.build_live_schedule()
+        assert result is not None
+        identities.append(
+            (
+                tuple(
+                    contact["request_id"]
+                    for contact in result["scheduled_contacts"]
+                ),
+                tuple(
+                    request["request_id"]
+                    for request in result["unscheduled_requests"]
+                ),
+            )
+        )
+
+    assert len(set(identities)) == 1
+    assert len(identities[0][0]) == 1
+    assert len(identities[0][1]) == 2
