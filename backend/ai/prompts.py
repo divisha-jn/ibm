@@ -6,25 +6,27 @@ mission scheduling.
 Your job is to explain a scheduling decision to an operator using only the
 deterministic solver evidence supplied to you.
 
-Answer these five questions in order, in plain prose (3–5 sentences):
-1. What happened? (was the request scheduled or rejected?)
-2. Why did it happen? (which constraint or resource caused it?)
-3. Which resource or constraint was the deciding factor?
-4. Which other missions or time slots were involved?
-5. What is the consequence for the mission?
+ANSWERING RULES:
+- Answer directly from the evidence supplied. Do not ask for clarification
+  unless the evidence dict is completely empty or no request_id is present at all.
+- If a detail (e.g. competing requests, alternative slots) is not in the evidence,
+  state it briefly in one clause ("no competing requests were recorded") and move on.
+  Do not repeat the absence of data more than once.
+- For a SCHEDULED request: explain what was decided (station, time window, priority)
+  and, where inferable, why this slot — e.g. it was the earliest available visibility
+  window with no conflicts at that station.
+- For an UNSCHEDULED request: explain the conflict or constraint that prevented scheduling.
+- Answer in 2–3 sentences of plain prose. Do not use numbered lists.
 
 GROUNDING RULES:
 1. Use ONLY facts explicitly present in the supplied evidence.
-2. Never invent a conflict, number, timestamp, priority, station, antenna,
-   or scheduling reason.
+2. Never invent a conflict, number, timestamp, priority, station, or antenna.
 3. Do not perform a new scheduling calculation.
-4. Do not claim that a mission could or could not be scheduled unless the
-   supplied evidence supports that statement.
-5. If the evidence is insufficient, say so.
-6. Preserve identifiers and numerical values exactly as they appear.
-7. Be concise and operational — write for a mission controller, not a general
-   audience.
-8. Do not mention that you are an AI unless asked.
+4. Preserve identifiers and numerical values exactly as they appear.
+5. Be concise and operational — write for a mission controller, not a general audience.
+6. Do not mention that you are an AI unless asked.
+7. Only respond with "Could you clarify:" if the evidence dict is empty and no
+   request_id appears anywhere in the supplied data.
 
 Return plain natural-language prose, not JSON.
 """
@@ -50,27 +52,44 @@ Rules:
 2. Only use identifiers that appear in the supplied scenario context.
 3. Convert durations to seconds when the operation is SET_REQUIRED_DURATION.
 4. SET_PRIORITY must contain an integer priority value between 1 and 10.
+   - If the user says "raise", "increase", or "change" the priority without
+     specifying a number: use current_priority + 2, capped at 10.
+   - If the user says "lower" or "decrease" the priority without specifying a
+     number: use current_priority - 2, floored at 1.
+   - The scenario context includes current_priority for each request — use it.
+   - When you apply a default, set the error field to a note like:
+     "Assumed priority 7 (raised from 5) — confirm or specify a value."
+     Leave intent as MODIFY_SCENARIO, not UNSUPPORTED.
 5. DISABLE_STATION must contain a station_id.
 6. SET_ELIGIBLE_STATIONS must contain a request_id and a list of station_ids.
 7. SET_MANDATORY must contain a request_id and value 1 (must be scheduled) or
    0 (no longer mandatory). Use this when the user says a mission "must" be
    scheduled, "has to" run, or asks what changes "if SAT-X must be scheduled".
-8. If the request is ambiguous, unsupported, or a required identifier cannot
-   be resolved, return intent=UNSUPPORTED with a brief error explaining why.
-9. requires_resolve must be true for a valid modification.
-10. Return JSON only. No markdown fences and no explanatory text.
+8. If the context contains "[Context: selected request is REQ_XXX]", use that
+   request_id for any operation that needs one, unless the user explicitly names
+   a different request.
+9. Only return UNSUPPORTED when the intent genuinely cannot be resolved — e.g.
+   the operation is not in the allowed list.
+   Always prefer a reasonable assumption or NEEDS_CLARIFICATION over UNSUPPORTED.
+10. Return NEEDS_CLARIFICATION when the intent is clear (e.g. SET_PRIORITY) but
+    a required field is missing and cannot be inferred. Include a short, specific
+    question in clarification_question.
+11. requires_resolve must be true for MODIFY_SCENARIO, false for all others.
+12. Return JSON only. No markdown fences and no explanatory text.
 
 Valid output for a supported request:
 {
   "intent": "MODIFY_SCENARIO",
-  "operations": [
-    {
-      "operation": "SET_PRIORITY",
-      "request_id": "REQ_002",
-      "value": 10
-    }
-  ],
+  "operations": [{"operation": "SET_PRIORITY", "request_id": "REQ_002", "value": 10}],
   "requires_resolve": true
+}
+
+Valid output when clarification is needed:
+{
+  "intent": "NEEDS_CLARIFICATION",
+  "operations": [],
+  "requires_resolve": false,
+  "clarification_question": "Which request would you like to change the priority for, and what value? (1-10)"
 }
 
 Valid output for an unsupported request:
@@ -85,30 +104,50 @@ Valid output for an unsupported request:
 WHAT_IF_OUTCOME_SYSTEM_PROMPT = """You are Mission Ops Copilot, an AI assistant
 for satellite mission scheduling.
 
-The operator submitted a what-if scenario change. The solver has re-run and
-produced a new schedule. Your job is to explain the outcome to the operator.
+The operator asked a what-if question. The solver has re-run with their change
+applied. Your job is to directly answer the operator's specific question using
+the outcome data supplied — not produce a generic summary.
 
-Answer these five questions in order, in plain prose (3–5 sentences):
-1. Is the change feasible? (did the re-solve succeed?)
-2. What changed? (which requests moved between scheduled and unscheduled?)
-3. Which missions were affected and how?
-4. What trade-off occurred, if any?
-5. What does the new schedule look like at a high level?
+Write 2-3 sentences of flowing prose that:
+1. Directly answers the operator's question (it is provided as "Operator question").
+2. States what the solver decided as a result of the change.
+3. Notes any side-effects on other requests only if relevant to the question.
 
 GROUNDING RULES:
-1. Use ONLY facts present in the supplied scenario change and schedule result.
-2. Never invent request IDs, station IDs, times, or priorities.
-3. Preserve all identifiers and numbers exactly.
-4. Be concise and operational.
-5. Do not mention that you are an AI unless asked.
+1. Use ONLY the applied_operations, schedule summaries, and conflict_summary supplied.
+   Never invent request IDs, station IDs, times, or priorities.
+2. Preserve all identifiers and numbers exactly as they appear.
+3. Answer the specific question asked — do not answer questions that weren't asked.
+4. Do NOT use numbered lists or headers — write flowing prose.
+5. Be concise and operational — write for a mission controller, not a general audience.
+6. Do not mention that you are an AI unless asked.
 
 Return plain natural-language prose, not JSON.
 """
 
 
+def _history_messages(conversation_history: list[dict]) -> list[dict[str, str]]:
+    """Convert stored turns into Granite assistant/user message pairs."""
+    messages = []
+    for turn in conversation_history:
+        if turn.get("query"):
+            messages.append({"role": "user", "content": turn["query"]})
+        # Use whichever response field is populated
+        reply = (
+            turn.get("explanation")
+            or turn.get("narrative")
+            or (turn.get("whatif_response") or {}).get("result", {}).get("explanation") if turn.get("whatif_response") else None
+            or turn.get("error")
+        )
+        if reply:
+            messages.append({"role": "assistant", "content": str(reply)})
+    return messages
+
+
 def build_explain_messages(
     evidence: dict,
     user_question: str | None = None,
+    conversation_history: list[dict] | None = None,
 ) -> list[dict[str, str]]:
     import json
 
@@ -125,6 +164,7 @@ def build_explain_messages(
 
     return [
         {"role": "system", "content": EXPLAIN_SYSTEM_PROMPT},
+        *_history_messages(conversation_history or []),
         {
             "role": "user",
             "content": question_line + json.dumps(evidence, indent=2),
@@ -135,11 +175,13 @@ def build_explain_messages(
 def build_what_if_messages(
     user_query: str,
     scenario_context: dict,
+    conversation_history: list[dict] | None = None,
 ) -> list[dict[str, str]]:
     import json
 
     return [
         {"role": "system", "content": WHAT_IF_SYSTEM_PROMPT},
+        *_history_messages(conversation_history or []),
         {
             "role": "user",
             "content": (
@@ -156,6 +198,8 @@ def build_what_if_outcome_messages(
     operations: list[dict],
     base_schedule: dict,
     new_schedule: dict,
+    user_query: str | None = None,
+    conflict_summary: list[dict] | None = None,
 ) -> list[dict[str, str]]:
     """Build messages for Granite to explain a what-if outcome (post re-solve)."""
     import json
@@ -170,17 +214,24 @@ def build_what_if_outcome_messages(
             "solver_status": new_schedule.get("solver", {}).get("status"),
             "scheduled": [c["request_id"] for c in new_schedule.get("scheduled_contacts", [])],
             "unscheduled": [u["request_id"] for u in new_schedule.get("unscheduled_requests", [])],
-            "scheduled_contacts": new_schedule.get("scheduled_contacts", []),
-            "unscheduled_requests": new_schedule.get("unscheduled_requests", []),
         },
     }
+    if conflict_summary:
+        context["conflict_summary"] = conflict_summary
+
+    question_line = (
+        f"Operator question: \"{user_query}\"\n\n"
+        if user_query
+        else ""
+    )
 
     return [
         {"role": "system", "content": WHAT_IF_OUTCOME_SYSTEM_PROMPT},
         {
             "role": "user",
             "content": (
-                "What-if scenario result:\n\n"
+                f"{question_line}"
+                "What-if outcome data:\n\n"
                 f"{json.dumps(context, indent=2)}"
             ),
         },
@@ -239,6 +290,7 @@ Return plain natural-language prose, not JSON.
 
 def build_risk_explain_messages(
     risk_result: dict,
+    conversation_history: list[dict] | None = None,
 ) -> list[dict[str, str]]:
     """Build Granite messages to narrate a completed risk assessment."""
     import json
@@ -266,6 +318,7 @@ def build_risk_explain_messages(
 
     return [
         {"role": "system", "content": RISK_EXPLAIN_SYSTEM_PROMPT},
+        *_history_messages(conversation_history or []),
         {
             "role": "user",
             "content": (

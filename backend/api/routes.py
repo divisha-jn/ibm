@@ -116,15 +116,23 @@ def explain_conflict(request: ExplainRequest):
     explanation = _explain_from_evidence(
         request.request_id, evidence_envelope, scheduled_contact,
         user_question=request.user_question,
+        conversation_history=request.conversation_history,
     )
 
     # Step 5: extract structured evidence (only for unscheduled)
     evidence = _extract_evidence(request.request_id, evidence_envelope)
 
+    # Step 6: detect clarification response from Granite
+    clarification_question: str | None = None
+    if explanation.startswith("Could you clarify"):
+        clarification_question = explanation
+        explanation = ""
+
     return ExplainResponse(
         request_id=request.request_id,
         explanation=explanation,
         evidence=evidence,
+        clarification_question=clarification_question,
     )
 
 
@@ -168,6 +176,7 @@ def _explain_from_evidence(
     scheduled_contact: dict | None,
     *,
     user_question: str | None = None,
+    conversation_history: list | None = None,
 ) -> str:
     """
     Produce a Granite explanation for a scheduling decision.
@@ -195,6 +204,7 @@ def _explain_from_evidence(
                  "evidence": [scheduled_evidence]},
                 request_id=request_id,
                 user_question=user_question,
+                conversation_history=conversation_history,
             )
         except Exception as exc:  # noqa: BLE001
             logger.info("Granite explain unavailable for scheduled request (%s) — using factual fallback.", exc)
@@ -225,7 +235,12 @@ def _explain_from_evidence(
     # Try Granite explanation
     try:
         from backend.ai.explain import explain_conflict as granite_explain
-        return granite_explain(evidence_envelope, request_id=request_id, user_question=user_question)
+        return granite_explain(
+            evidence_envelope,
+            request_id=request_id,
+            user_question=user_question,
+            conversation_history=conversation_history,
+        )
     except Exception as exc:  # noqa: BLE001
         logger.info("Granite explain_conflict unavailable (%s) — using factual fallback.", exc)
 
@@ -337,7 +352,7 @@ def get_risk(request: RiskRequest):
     narrative: str | None = None
     try:
         from backend.ai.explain import explain_risk
-        narrative = explain_risk(risk_result)
+        narrative = explain_risk(risk_result, conversation_history=request.conversation_history)
     except Exception as exc:  # noqa: BLE001
         logger.info("Granite explain_risk unavailable (%s) — omitting narrative.", exc)
 

@@ -2,12 +2,15 @@
 
 import { useEffect, useState } from "react";
 import styles from "./RiskPanel.module.css";
-import { fetchRiskAssessment, RiskAssessment } from "../lib/api";
+import { fetchRiskAssessment, saveChatTurn, RiskAssessment, ChatTurnOut } from "../lib/api";
 import { Mission } from "../data/mockMissions";
 
 interface Props {
   scenarioId: string;
   selectedMission: Mission | null;
+  sessionId: string;
+  conversationHistory: ChatTurnOut[];
+  onRiskSaved: (turn: ChatTurnOut) => void;
 }
 
 const FACTOR_LABELS: Record<string, string> = {
@@ -28,7 +31,7 @@ function levelClass(level: string | null | undefined) {
   return "NoData";
 }
 
-export default function RiskPanel({ scenarioId, selectedMission }: Props) {
+export default function RiskPanel({ scenarioId, selectedMission, sessionId, conversationHistory, onRiskSaved }: Props) {
   const [risk, setRisk] = useState<RiskAssessment | null>(null);
   const [loading, setLoading] = useState(false);
   const [dimReason, setDimReason] = useState<string | null>(null);
@@ -42,11 +45,24 @@ export default function RiskPanel({ scenarioId, selectedMission }: Props) {
     setLoading(true);
     setRisk(null);
     setDimReason(null);
-    fetchRiskAssessment(scenarioId, selectedMission.mission_id)
-      .then((r) => setRisk(r))
+    fetchRiskAssessment(scenarioId, selectedMission.mission_id, true, conversationHistory)
+      .then((r) => {
+        setRisk(r);
+        const turn: ChatTurnOut = {
+          query: `Risk assessment for ${selectedMission.mission_id}`,
+          type: "risk",
+          explanation: r.narrative ?? null,
+          whatif_response: null,
+          risk_response: r as any,
+          error: null,
+          created_at: new Date().toISOString(),
+        };
+        onRiskSaved(turn);
+        saveChatTurn(sessionId, turn.query, "risk", r.narrative ?? null, null, null, r as any);
+      })
       .catch(() => setDimReason("Failed to reach the backend."))
       .finally(() => setLoading(false));
-  }, [selectedMission, scenarioId]);
+  }, [selectedMission, scenarioId]);  // eslint-disable-line react-hooks/exhaustive-deps
 
   // Decide whether we have a real score to show "alive," or should stay dimmed.
   const hasScore =

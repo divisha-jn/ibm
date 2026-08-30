@@ -72,10 +72,11 @@ class Operation(BaseModel):
 class WhatIfInterpretation(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    intent: Literal["MODIFY_SCENARIO", "UNSUPPORTED"]
+    intent: Literal["MODIFY_SCENARIO", "UNSUPPORTED", "NEEDS_CLARIFICATION"]
     operations: list[Operation] = Field(default_factory=list)
     requires_resolve: bool
     error: str | None = None
+    clarification_question: str | None = None  # populated when intent == "NEEDS_CLARIFICATION"
 
     @model_validator(mode="after")
     def validate_interpretation(self) -> "WhatIfInterpretation":
@@ -88,10 +89,6 @@ class WhatIfInterpretation(BaseModel):
                 raise ValueError(
                     "Scenario modifications must require a solver re-resolve."
                 )
-            if self.error:
-                raise ValueError(
-                    "A supported modification cannot contain an error."
-                )
 
         if self.intent == "UNSUPPORTED":
             if self.operations:
@@ -101,6 +98,20 @@ class WhatIfInterpretation(BaseModel):
             if self.requires_resolve:
                 raise ValueError(
                     "UNSUPPORTED interpretation cannot require a resolve."
+                )
+
+        if self.intent == "NEEDS_CLARIFICATION":
+            if not self.clarification_question:
+                raise ValueError(
+                    "NEEDS_CLARIFICATION requires a clarification_question."
+                )
+            if self.operations:
+                raise ValueError(
+                    "NEEDS_CLARIFICATION cannot contain operations."
+                )
+            if self.requires_resolve:
+                raise ValueError(
+                    "NEEDS_CLARIFICATION cannot require a resolve."
                 )
 
         return self
@@ -189,6 +200,7 @@ def parse_what_if(
     user_query: str,
     scenario_context: dict[str, Any],
     *,
+    conversation_history: list[dict[str, Any]] | None = None,
     client: GraniteClient | None = None,
 ) -> WhatIfInterpretation:
     """Parse a user what-if request into a validated, solver-ready intent."""
@@ -201,7 +213,7 @@ def parse_what_if(
     granite = client or GraniteClient()
 
     raw = granite.chat(
-        build_what_if_messages(user_query.strip(), scenario_context),
+        build_what_if_messages(user_query.strip(), scenario_context, conversation_history=conversation_history),
         max_completion_tokens=350,
         temperature=0.0,
     )

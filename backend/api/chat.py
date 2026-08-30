@@ -49,10 +49,16 @@ def _ensure_schema() -> None:
                 type            TEXT NOT NULL,
                 explanation     TEXT,
                 whatif_response TEXT,
+                risk_response   TEXT,
                 error           TEXT,
                 created_at      TEXT NOT NULL
             )
         """)
+        # Add risk_response column to existing DBs that predate this migration
+        try:
+            conn.execute("ALTER TABLE chat_turns ADD COLUMN risk_response TEXT")
+        except Exception:  # noqa: BLE001
+            pass  # column already exists
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_session "
             "ON chat_turns(session_id, id)"
@@ -70,9 +76,10 @@ _ensure_schema()
 class SaveTurnRequest(BaseModel):
     session_id: str
     query: str
-    type: str                          # "explain" | "whatif"
+    type: str                          # "explain" | "whatif" | "risk"
     explanation: str | None = None     # set when type == "explain"
     whatif_response: dict[str, Any] | None = None  # set when type == "whatif"
+    risk_response: dict[str, Any] | None = None    # set when type == "risk"
     error: str | None = None
 
 
@@ -81,6 +88,7 @@ class ChatTurnOut(BaseModel):
     type: str
     explanation: str | None
     whatif_response: dict[str, Any] | None
+    risk_response: dict[str, Any] | None
     error: str | None
     created_at: str
 
@@ -101,14 +109,15 @@ def save_turn(request: SaveTurnRequest) -> dict:
     with _connect() as conn:
         conn.execute(
             "INSERT INTO chat_turns "
-            "(session_id, query, type, explanation, whatif_response, error, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            "(session_id, query, type, explanation, whatif_response, risk_response, error, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 request.session_id,
                 request.query,
                 request.type,
                 request.explanation,
                 json.dumps(request.whatif_response) if request.whatif_response else None,
+                json.dumps(request.risk_response) if request.risk_response else None,
                 request.error,
                 now,
             ),
@@ -122,7 +131,7 @@ def get_history(session_id: str) -> HistoryResponse:
     """Return all turns for a session, oldest-first."""
     with _connect() as conn:
         rows = conn.execute(
-            "SELECT query, type, explanation, whatif_response, error, created_at "
+            "SELECT query, type, explanation, whatif_response, risk_response, error, created_at "
             "FROM chat_turns WHERE session_id = ? ORDER BY id ASC",
             (session_id,),
         ).fetchall()
@@ -135,11 +144,18 @@ def get_history(session_id: str) -> HistoryResponse:
                 whatif = json.loads(row["whatif_response"])
             except (json.JSONDecodeError, TypeError):
                 pass
+        risk = None
+        if row["risk_response"]:
+            try:
+                risk = json.loads(row["risk_response"])
+            except (json.JSONDecodeError, TypeError):
+                pass
         turns.append(ChatTurnOut(
             query=row["query"],
             type=row["type"],
             explanation=row["explanation"],
             whatif_response=whatif,
+            risk_response=risk,
             error=row["error"],
             created_at=row["created_at"],
         ))

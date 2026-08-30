@@ -20,6 +20,7 @@ def explain_conflict(
     *,
     request_id: str | None = None,
     user_question: str | None = None,
+    conversation_history: list[dict[str, Any]] | None = None,
     client: GraniteClient | None = None,
 ) -> str:
     """Generate a grounded explanation from P2 conflict evidence.
@@ -56,7 +57,11 @@ def explain_conflict(
         client = GraniteClient()
 
     return client.chat(
-        build_explain_messages(evidence, user_question=user_question),
+        build_explain_messages(
+            evidence,
+            user_question=user_question,
+            conversation_history=conversation_history,
+        ),
         max_completion_tokens=300,
         temperature=0.0,
     )
@@ -67,25 +72,31 @@ def explain_outcome(
     base_schedule: dict[str, Any],
     new_schedule: dict[str, Any],
     *,
+    user_query: str | None = None,
+    conflict_summary: list[dict[str, Any]] | None = None,
     client: "GraniteClient | None" = None,
 ) -> str:
-    """Generate a natural-language explanation for a successful what-if outcome.
-
-    Called when the re-solve produced a valid schedule (possibly with no new
-    rejections), so there is no conflict evidence to pass to explain_conflict().
+    """Generate a natural-language explanation for a what-if outcome.
 
     Args:
-        operations:   The list of operations that were applied (from intent).
-        base_schedule: The original contract #5 schedule before the change.
-        new_schedule:  The new contract #5 schedule after the re-solve.
-        client:        Optional pre-built GraniteClient (useful in tests).
+        operations:       The list of operations that were applied (from intent).
+        base_schedule:    The original contract #5 schedule before the change.
+        new_schedule:     The new contract #5 schedule after the re-solve.
+        user_query:       The operator's original question — Granite answers it directly.
+        conflict_summary: Condensed conflict evidence for requests still unscheduled
+                          after the re-solve; None when everything scheduled cleanly.
+        client:           Optional pre-built GraniteClient (useful in tests).
     """
     if client is None:
         from .granite import GraniteClient
         client = GraniteClient()
 
     return client.chat(
-        build_what_if_outcome_messages(operations, base_schedule, new_schedule),
+        build_what_if_outcome_messages(
+            operations, base_schedule, new_schedule,
+            user_query=user_query,
+            conflict_summary=conflict_summary,
+        ),
         max_completion_tokens=350,
         temperature=0.0,
     )
@@ -94,6 +105,7 @@ def explain_outcome(
 def explain_risk(
     risk_result: dict,
     *,
+    conversation_history: list[dict[str, Any]] | None = None,
     client: "GraniteClient | None" = None,
 ) -> str:
     """Generate a natural-language narrative for a completed risk assessment.
@@ -117,7 +129,7 @@ def explain_risk(
         client = GraniteClient()
 
     return client.chat(
-        build_risk_explain_messages(risk_result),
+        build_risk_explain_messages(risk_result, conversation_history=conversation_history),
         max_completion_tokens=350,
         temperature=0.0,
     )

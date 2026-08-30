@@ -2,16 +2,14 @@
 
 import { useState, useEffect, useRef } from "react";
 import styles from "./WhatIfChat.module.css";
-import { fetchWhatIf, fetchExplanation, fetchAlternatives, fetchChatHistory, saveChatTurn, WhatIfResponse, AlternativesResponse } from "../lib/api";
+import { fetchWhatIf, fetchExplanation, fetchAlternatives, fetchChatHistory, saveChatTurn, WhatIfResponse, AlternativesResponse, ChatTurnOut } from "../lib/api";
 import { Mission } from "../data/mockMissions";
 
 
 const SCHEDULED_SUGGESTIONS = [
   "Why was this scheduled here?",
   "Why this time slot?",
-  "Why this antenna?",
   "What constraints influenced this decision?",
-  "Which other requests competed for this slot?",
   "What would happen if I changed the priority?",
 ];
 
@@ -44,8 +42,10 @@ interface ChatTurn {
   response: WhatIfResponse | null;
   explanation: string | null;
   alternatives: AlternativesResponse | null;
+  clarification_question: string | null;  // bot asks for more info
+  pending_clarification_for: string | null;  // original query awaiting clarification
   error: string | null;
-  type: "explain" | "whatif" | "alternatives";
+  type: "explain" | "whatif" | "alternatives" | "clarification";
 }
 
 interface Props {
@@ -69,6 +69,7 @@ function getSessionId(scenarioId: string, missionId: string | null): string {
 export default function WhatIfChat({ scenarioId, selectedMission }: Props) {
   const [input, setInput] = useState("");
   const [turns, setTurns] = useState<ChatTurn[]>([]);
+  const [history, setHistory] = useState<ChatTurnOut[]>([]);
   const [loading, setLoading] = useState(false);
   const prevMissionId = useRef<string | null>(null);
 
@@ -80,19 +81,23 @@ export default function WhatIfChat({ scenarioId, selectedMission }: Props) {
     if (selectedMission?.mission_id !== prevMissionId.current) {
       prevMissionId.current = selectedMission?.mission_id ?? null;
       setTurns([]);
+      setHistory([]);
       setInput("");
     }
 
     // Load persisted history for this session
-    fetchChatHistory(sessionId).then((history) => {
-      if (history.length === 0) return;
+    fetchChatHistory(sessionId).then((loaded) => {
+      if (loaded.length === 0) return;
+      setHistory(loaded);
       setTurns(
-        history.map((t) => ({
+        loaded.map((t) => ({
           query: t.query,
-          type: t.type as "explain" | "whatif" | "alternatives",
+          type: t.type as "explain" | "whatif" | "alternatives" | "clarification",
           explanation: t.explanation,
           response: t.whatif_response as WhatIfResponse | null,
           alternatives: null,
+          clarification_question: null,
+          pending_clarification_for: null,
           error: t.error,
         }))
       );
@@ -100,13 +105,23 @@ export default function WhatIfChat({ scenarioId, selectedMission }: Props) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedMission, sessionId]);
 
-  async function handleSend(query?: string) {
-    const q = (query ?? input).trim();
-    if (!q || loading) return;
+  // If the last turn is a clarification, prepend its question + original query to the new query
+  function buildClarifiedQuery(q: string): string {
+    const lastTurn = turns[turns.length - 1];
+    if (lastTurn?.clarification_question && lastTurn?.pending_clarification_for) {
+      return `${lastTurn.pending_clarification_for} — clarification: ${q}`;
+    }
+    return q;
+  }
 
+  async function handleSend(query?: string) {
+    const rawQ = (query ?? input).trim();
+    if (!rawQ || loading) return;
+
+    const q = buildClarifiedQuery(rawQ);
     setInput("");
     setLoading(true);
-    setTurns((prev) => [...prev, { query: q, response: null, explanation: null, alternatives: null, error: null, type: isWhatIfQuestion(q) ? "whatif" : "explain" }]);
+    setTurns((prev) => [...prev, { query: rawQ, response: null, explanation: null, alternatives: null, clarification_question: null, pending_clarification_for: null, error: null, type: isWhatIfQuestion(q) ? "whatif" : "explain" }]);
 
     try {
       if (isWhatIfQuestion(q) || !selectedMission) {
@@ -114,22 +129,51 @@ export default function WhatIfChat({ scenarioId, selectedMission }: Props) {
         const enrichedQuery = selectedMission
           ? `[Context: selected request is ${selectedMission.mission_id}] ${q}`
           : q;
-        const response = await fetchWhatIf(scenarioId, enrichedQuery);
-        setTurns((prev) => {
-          const copy = [...prev];
-          copy[copy.length - 1] = { query: q, response, explanation: null, alternatives: null, error: null, type: "whatif" };
-          return copy;
-        });
-        saveChatTurn(sessionId, q, "whatif", null, response, null);
+        const response = await fetchWhatIf(scenarioId, enrichedQuery, history);
+
+        // Check if Granite needs more info
+        if (response.interpretation.intent === "NEEDS_CLARIFICATION") {
+          const cq = response.interpretation.clarification_question ?? "Could you provide more details?";
+          setTurns((prev) => {
+            const copy = [...prev];
+            copy[copy.length - 1] = { query: rawQ, response: null, explanation: null, alternatives: null, clarification_question: cq, pending_clarification_for: q, error: null, type: "clarification" };
+            return copy;
+          });
+        } else {
+          setTurns((prev) => {
+            const copy = [...prev];
+            copy[copy.length - 1] = { query: rawQ, response, explanation: null, alternatives: null, clarification_question: null, pending_clarification_for: null, error: null, type: "whatif" };
+            return copy;
+          });
+          const saved: ChatTurnOut = { query: rawQ, type: "whatif", explanation: null, whatif_response: response as any, risk_response: null, error: null, created_at: new Date().toISOString() };
+          setHistory((h) => [...h, saved]);
+          saveChatTurn(sessionId, rawQ, "whatif", null, response as any, null);
+        }
       } else {
         // Route to /explain — carry the selected request as context
-        const explanation = await fetchExplanation(scenarioId, selectedMission.mission_id, q);
-        setTurns((prev) => {
-          const copy = [...prev];
-          copy[copy.length - 1] = { query: q, response: null, explanation, alternatives: null, error: null, type: "explain" };
-          return copy;
-        });
-        saveChatTurn(sessionId, q, "explain", explanation, null, null);
+        const data = await fetch(`http://localhost:8000/api/v1/explain`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ scenario_id: scenarioId, request_id: selectedMission.mission_id, user_question: q, conversation_history: history }),
+        }).then((r) => r.json());
+
+        if (data.clarification_question) {
+          setTurns((prev) => {
+            const copy = [...prev];
+            copy[copy.length - 1] = { query: rawQ, response: null, explanation: null, alternatives: null, clarification_question: data.clarification_question, pending_clarification_for: q, error: null, type: "clarification" };
+            return copy;
+          });
+        } else {
+          const explanation = data.explanation as string;
+          setTurns((prev) => {
+            const copy = [...prev];
+            copy[copy.length - 1] = { query: rawQ, response: null, explanation, alternatives: null, clarification_question: null, pending_clarification_for: null, error: null, type: "explain" };
+            return copy;
+          });
+          const saved: ChatTurnOut = { query: rawQ, type: "explain", explanation, whatif_response: null, risk_response: null, error: null, created_at: new Date().toISOString() };
+          setHistory((h) => [...h, saved]);
+          saveChatTurn(sessionId, rawQ, "explain", explanation, null, null);
+        }
       }
     } catch (err) {
       const errorMsg = "Failed to reach the backend — is it running?";
@@ -153,14 +197,14 @@ export default function WhatIfChat({ scenarioId, selectedMission }: Props) {
   setLoading(true);
   setTurns((prev) => [
     ...prev,
-    { query: q, response: null, explanation: null, alternatives: null, error: null, type: "alternatives" },
+    { query: q, response: null, explanation: null, alternatives: null, clarification_question: null, pending_clarification_for: null, error: null, type: "alternatives" },
   ]);
 
   try {
     const alternatives = await fetchAlternatives(scenarioId, selectedMission.mission_id, 3);
     setTurns((prev) => {
       const copy = [...prev];
-      copy[copy.length - 1] = { query: q, response: null, explanation: null, alternatives, error: null, type: "alternatives" };
+      copy[copy.length - 1] = { query: q, response: null, explanation: null, alternatives, clarification_question: null, pending_clarification_for: null, error: null, type: "alternatives" };
       return copy;
     });
   } catch (err) {
@@ -232,8 +276,16 @@ export default function WhatIfChat({ scenarioId, selectedMission }: Props) {
           <div key={i} className={styles.turn}>
             <div className={styles.userQuery}>{turn.query}</div>
 
-            {!turn.response && !turn.explanation && !turn.alternatives && !turn.error && (
+            {!turn.response && !turn.explanation && !turn.alternatives && !turn.clarification_question && !turn.error && (
               <div className={styles.loadingText}>Thinking...</div>
+            )}
+
+            {/* Clarification request */}
+            {turn.clarification_question && (
+              <div className={styles.response}>
+                <div className={styles.responseLabel}>Needs clarification</div>
+                {turn.clarification_question}
+              </div>
             )}
 
             {turn.error && (

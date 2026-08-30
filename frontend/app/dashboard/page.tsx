@@ -1,10 +1,11 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import MissionGantt from "../../components/MissionGantt";
 import WhatIfChat from "../../components/WhatIfChat";
 import RiskPanel from "../../components/RiskPanel";
 import { Mission } from "../../data/mockMissions";
+import { ChatTurnOut } from "../../lib/api";
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -19,6 +20,14 @@ export default function DashboardPage() {
   }, [router]);
 
   const [selectedMission, setSelectedMission] = useState<Mission | null>(null);
+  const [riskHistory, setRiskHistory] = useState<ChatTurnOut[]>([]);
+
+  // Shared session ID for the current scenario — used by both RiskPanel and WhatIfChat
+  const sessionId = `chat_session__DEMO_001__${selectedMission?.mission_id ?? "global"}`;
+
+  const handleRiskSaved = useCallback((turn: ChatTurnOut) => {
+    setRiskHistory((h) => [...h, turn]);
+  }, []);
 
   if (!authed) return null; // brief blank screen while checking, avoids flashing the dashboard
 
@@ -75,7 +84,13 @@ export default function DashboardPage() {
           marginTop: 24,
         }}
       >
-        <RiskPanel scenarioId="DEMO_001" selectedMission={selectedMission} />
+        <RiskPanel
+          scenarioId="DEMO_001"
+          selectedMission={selectedMission}
+          sessionId={sessionId}
+          conversationHistory={riskHistory}
+          onRiskSaved={handleRiskSaved}
+        />
         <WhatIfChat scenarioId="DEMO_001" selectedMission={selectedMission} />
       </div>
     </main>

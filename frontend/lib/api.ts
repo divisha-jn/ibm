@@ -11,6 +11,7 @@ export interface ChatTurnOut {
   type: string;
   explanation: string | null;
   whatif_response: Record<string, any> | null;
+  risk_response: Record<string, any> | null;
   error: string | null;
   created_at: string;
 }
@@ -32,7 +33,8 @@ export async function saveChatTurn(
   type: string,
   explanation: string | null,
   whatifResponse: Record<string, any> | null,
-  error: string | null
+  error: string | null,
+  riskResponse: Record<string, any> | null = null,
 ): Promise<void> {
   try {
     await fetch(`${API_BASE}/chat/history`, {
@@ -44,6 +46,7 @@ export async function saveChatTurn(
         type,
         explanation,
         whatif_response: whatifResponse,
+        risk_response: riskResponse,
         error,
       }),
     });
@@ -55,7 +58,8 @@ export async function saveChatTurn(
 export async function fetchExplanation(
   scenarioId: string,
   requestId: string,
-  userQuestion?: string
+  userQuestion?: string,
+  conversationHistory: ChatTurnOut[] = [],
 ) {
   const res = await fetch(`${API_BASE}/explain`, {
     method: "POST",
@@ -64,6 +68,7 @@ export async function fetchExplanation(
       scenario_id: scenarioId,
       request_id: requestId,
       user_question: userQuestion,
+      conversation_history: conversationHistory,
     }),
   });
   if (!res.ok) throw new Error(`Explain failed: ${res.status}`);
@@ -82,10 +87,11 @@ export interface WhatIfResponse {
   base_scenario_id: string;
   user_query: string;
   interpretation: {
-    intent: string;
+    intent: string;  // "MODIFY_SCENARIO" | "UNSUPPORTED" | "NEEDS_CLARIFICATION"
     operations: { operation: string; request_id: string; value: any }[];
     requires_resolve: boolean;
     error?: string | null;
+    clarification_question?: string | null;
   };
   result: {
     solver_status: string;
@@ -102,7 +108,8 @@ export interface WhatIfResponse {
 
 export async function fetchWhatIf(
   baseScenarioId: string,
-  userQuery: string
+  userQuery: string,
+  conversationHistory: ChatTurnOut[] = [],
 ): Promise<WhatIfResponse> {
   const res = await fetch(`${API_BASE}/what-if`, {
     method: "POST",
@@ -110,6 +117,7 @@ export async function fetchWhatIf(
     body: JSON.stringify({
       base_scenario_id: baseScenarioId,
       user_query: userQuery,
+      conversation_history: conversationHistory,
     }),
   });
   if (!res.ok) throw new Error(`What-if request failed: ${res.status}`);
@@ -199,7 +207,8 @@ export interface RiskAssessment {
 export async function fetchRiskAssessment(
   scenarioId: string,
   requestId: string,
-  includeWeather = true
+  includeWeather = true,
+  conversationHistory: ChatTurnOut[] = [],
 ): Promise<RiskAssessment> {
   const res = await fetch(`${API_BASE}/risk`, {
     method: "POST",
@@ -208,6 +217,7 @@ export async function fetchRiskAssessment(
       scenario_id: scenarioId,
       request_id: requestId,
       include_weather: includeWeather,
+      conversation_history: conversationHistory,
     }),
   });
   if (!res.ok) throw new Error(`Risk assessment failed: ${res.status}`);

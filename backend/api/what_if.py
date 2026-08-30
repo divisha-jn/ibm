@@ -72,11 +72,6 @@ def _interpretation_from_granite(wi) -> IntentInterpretation:
     """
     Convert a backend.ai.intent_parser.WhatIfInterpretation (P3's model)
     into an IntentInterpretation (P4's API schema).
-
-    The fields are identical in name and meaning; this is purely a Pydantic
-    model boundary crossing.  Written as an explicit converter (not .model_dump
-    + re-validate) so any future divergence between the two models is a compile-
-    time error here rather than a silent runtime mismatch.
     """
     return IntentInterpretation(
         intent=wi.intent,
@@ -92,6 +87,7 @@ def _interpretation_from_granite(wi) -> IntentInterpretation:
         ],
         requires_resolve=wi.requires_resolve,
         error=wi.error,
+        clarification_question=wi.clarification_question,
     )
 
 
@@ -99,22 +95,63 @@ def _interpretation_from_granite(wi) -> IntentInterpretation:
 # Intent parsing  —  real P3 call with validated local fallback
 # ---------------------------------------------------------------------------
 
-_LOCAL_PRIORITY_PATTERNS = (
+# Explicit patterns — require REQ_XXX id AND a numeric value.
+_LOCAL_PRIORITY_EXPLICIT_PATTERNS = (
     re.compile(
-        r"^\s*(?:what\s+if\s+)?(?:raise|set|bump)\s+"
+        r"^\s*(?:\[Context:[^\]]*\]\s*)?(?:what\s+if\s+)?(?:raise|set|bump)\s+"
         r"(?P<request_id>REQ_[A-Z0-9_]+)(?:'s)?\s+"
         r"(?:priority\s+)?(?:to|=|is)\s+"
         r"(?P<priority>[+-]?\d+)\s*\??\s*$",
         re.IGNORECASE,
     ),
     re.compile(
-        r"^\s*(?:what\s+if\s+)?"
+        r"^\s*(?:\[Context:[^\]]*\]\s*)?(?:what\s+if\s+)?"
         r"(?P<request_id>REQ_[A-Z0-9_]+)\s+"
         r"(?:becomes|is)\s+priority\s+"
         r"(?P<priority>[+-]?\d+)\s*\??\s*$",
         re.IGNORECASE,
     ),
 )
+
+# Vague priority change — direction word, no explicit id or value required.
+_LOCAL_PRIORITY_VAGUE_PATTERN = re.compile(
+    r"^\s*(?:\[Context:[^\]]*\]\s*)?"
+    r"(?:what\s+(?:would\s+)?happen\s+if\s+(?:i\s+)?|what\s+if\s+(?:i\s+)?|if\s+(?:i\s+)?)"
+    r"(?P<direction>raise[sd]?|increase[sd]?|bump(?:ed)?|change[sd]?|lower(?:ed)?|decrease[sd]?|reduce[sd]?)\s+"
+    r"(?:the\s+)?(?:mission\s+|request\s+)?priority\??\s*$",
+    re.IGNORECASE,
+)
+
+# Vague mandatory change.
+_LOCAL_MANDATORY_VAGUE_PATTERN = re.compile(
+    r"^\s*(?:\[Context:[^\]]*\]\s*)?"
+    r"(?:what\s+(?:would\s+)?happen\s+if\s+(?:this\s+)?|what\s+if\s+(?:this\s+)?)"
+    r"(?:becomes?\s+mandatory|is\s+mandatory|must\s+be\s+scheduled|has\s+to\s+run)\??\s*$",
+    re.IGNORECASE,
+)
+
+# Vague disable station.
+_LOCAL_DISABLE_VAGUE_PATTERN = re.compile(
+    r"^\s*(?:\[Context:[^\]]*\]\s*)?"
+    r"(?:what\s+(?:would\s+)?happen\s+if\s+|what\s+if\s+)"
+    r"(?:a\s+)?(?:ground\s+)?station\s+(?:goes?\s+offline|is\s+disabled|fails?)\??\s*$",
+    re.IGNORECASE,
+)
+
+# Extract [Context: selected request is REQ_XXX] prefix injected by frontend.
+_CONTEXT_REQUEST_RE = re.compile(
+    r"\[Context:\s*selected\s+request\s+is\s+(?P<request_id>REQ_[A-Z0-9_]+)\]",
+    re.IGNORECASE,
+)
+
+
+def _needs_clarification(question: str) -> IntentInterpretation:
+    return IntentInterpretation(
+        intent="NEEDS_CLARIFICATION",
+        operations=[],
+        requires_resolve=False,
+        clarification_question=question,
+    )
 
 
 def _unsupported_local_intent(error: str) -> IntentInterpretation:
@@ -126,53 +163,119 @@ def _unsupported_local_intent(error: str) -> IntentInterpretation:
     )
 
 
+def _resolve_request_id_from_context(query: str, scenario_context: dict) -> str | None:
+    """Extract request_id from [Context:] prefix, or from scenario if only one request."""
+    m = _CONTEXT_REQUEST_RE.search(query)
+    if m:
+        return m.group("request_id")
+    requests = [r for r in scenario_context.get("requests", []) if isinstance(r, dict)]
+    if len(requests) == 1:
+        return requests[0].get("request_id")
+    return None
+
+
 def _parse_local_priority_intent(
     query: str,
     scenario_context: dict,
 ) -> IntentInterpretation:
-    """Parse only an explicit request-priority change after P3 is unavailable."""
-    matches = [pattern.fullmatch(query) for pattern in _LOCAL_PRIORITY_PATTERNS]
-    matches = [match for match in matches if match is not None]
-    if len(matches) != 1:
-        return _unsupported_local_intent(
-            "Local fallback supports only one explicit request priority change."
-        )
+    """Local fallback parser when Granite is unavailable.
 
-    match = matches[0]
-    supplied_request_id = match.group("request_id").upper()
-    known_request_ids = {
-        request.get("request_id", "").upper(): request.get("request_id")
-        for request in scenario_context.get("requests", [])
-        if isinstance(request, dict) and isinstance(request.get("request_id"), str)
+    Handles explicit commands, vague commands with ±2 default, and returns
+    NEEDS_CLARIFICATION when required information is missing but the intent is clear.
+    """
+    known_requests = {
+        r.get("request_id", "").upper(): r
+        for r in scenario_context.get("requests", [])
+        if isinstance(r, dict) and isinstance(r.get("request_id"), str)
     }
-    request_id = known_request_ids.get(supplied_request_id)
-    if request_id is None:
-        return _unsupported_local_intent(
-            f"Unknown request_id {supplied_request_id!r}."
-        )
+    station_ids = scenario_context.get("station_ids", [])
 
-    priority = int(match.group("priority"))
-    if not 1 <= priority <= 10:
-        return _unsupported_local_intent(
-            "Priority must be an integer from 1 to 10."
-        )
-
-    return IntentInterpretation(
-        intent="MODIFY_SCENARIO",
-        operations=[
-            IntentOperation(
-                operation="SET_PRIORITY",
-                request_id=request_id,
-                value=priority,
+    # --- Explicit priority patterns ---
+    for pattern in _LOCAL_PRIORITY_EXPLICIT_PATTERNS:
+        m = pattern.fullmatch(query)
+        if m:
+            req = known_requests.get(m.group("request_id").upper())
+            if req is None:
+                return _unsupported_local_intent(f"Unknown request_id {m.group('request_id')!r}.")
+            priority = int(m.group("priority"))
+            if not 1 <= priority <= 10:
+                return _unsupported_local_intent("Priority must be between 1 and 10.")
+            return IntentInterpretation(
+                intent="MODIFY_SCENARIO",
+                operations=[IntentOperation(operation="SET_PRIORITY", request_id=req["request_id"], value=priority)],
+                requires_resolve=True,
             )
-        ],
-        requires_resolve=True,
+
+    # --- Vague priority change (±2 from current, or ask which request) ---
+    if _LOCAL_PRIORITY_VAGUE_PATTERN.fullmatch(query):
+        request_id = _resolve_request_id_from_context(query, scenario_context)
+        if request_id is None:
+            return _needs_clarification(
+                "Which request would you like to change the priority for? "
+                f"Available: {', '.join(r.get('request_id','') for r in scenario_context.get('requests',[]))}"
+            )
+        req = known_requests.get(request_id.upper(), {})
+        current = int(req.get("current_priority", req.get("priority", 5)))
+        direction = _LOCAL_PRIORITY_VAGUE_PATTERN.fullmatch(query).group("direction").lower()
+        if any(w in direction for w in ("raise", "increase", "bump", "change")):
+            new_priority = min(current + 2, 10)
+            note = f"Assumed priority {new_priority} (raised from {current}) — confirm or specify a value."
+        else:
+            new_priority = max(current - 2, 1)
+            note = f"Assumed priority {new_priority} (lowered from {current}) — confirm or specify a value."
+        return IntentInterpretation(
+            intent="MODIFY_SCENARIO",
+            operations=[IntentOperation(operation="SET_PRIORITY", request_id=request_id, value=new_priority)],
+            requires_resolve=True,
+            error=note,
+        )
+
+    # --- Vague mandatory change ---
+    if _LOCAL_MANDATORY_VAGUE_PATTERN.fullmatch(query):
+        request_id = _resolve_request_id_from_context(query, scenario_context)
+        if request_id is None:
+            return _needs_clarification(
+                "Which request should become mandatory? "
+                f"Available: {', '.join(r.get('request_id','') for r in scenario_context.get('requests',[]))}"
+            )
+        return IntentInterpretation(
+            intent="MODIFY_SCENARIO",
+            operations=[IntentOperation(operation="SET_MANDATORY", request_id=request_id, value=1)],
+            requires_resolve=True,
+        )
+
+    # --- Vague disable station ---
+    if _LOCAL_DISABLE_VAGUE_PATTERN.fullmatch(query):
+        if not station_ids:
+            return _unsupported_local_intent("No stations found in scenario context.")
+        if len(station_ids) == 1:
+            return IntentInterpretation(
+                intent="MODIFY_SCENARIO",
+                operations=[IntentOperation(operation="DISABLE_STATION", station_id=station_ids[0])],
+                requires_resolve=True,
+            )
+        return _needs_clarification(
+            f"Which station should go offline? Available: {', '.join(station_ids)}"
+        )
+
+    # --- No match: ask for clarification instead of hard UNSUPPORTED ---
+    lower = query.lower()
+    if any(kw in lower for kw in ("priority", "mandatory", "station", "duration", "schedule", "disable", "change", "what if", "what would")):
+        return _needs_clarification(
+            "I couldn't parse that request. Could you be more specific? For example: "
+            "'What if REQ_002 becomes priority 8?' or 'What if this becomes mandatory?'"
+        )
+
+    return _unsupported_local_intent(
+        "This type of change is not supported. Supported operations: "
+        "SET_PRIORITY, SET_REQUIRED_DURATION, DISABLE_STATION, SET_ELIGIBLE_STATIONS, SET_MANDATORY."
     )
 
 
 def _parse_intent(
     query: str,
     scenario_context: dict,
+    conversation_history: list | None = None,
 ) -> IntentInterpretation:
     """
     Call P3's parse_what_if() and convert the result to IntentInterpretation.
@@ -185,7 +288,7 @@ def _parse_intent(
     try:
         from backend.ai.intent_parser import parse_what_if, IntentParserError
         from backend.ai.granite import GraniteConfigurationError
-        wi = parse_what_if(query, scenario_context)
+        wi = parse_what_if(query, scenario_context, conversation_history=conversation_history)
         return _interpretation_from_granite(wi)
     except Exception as exc:  # noqa: BLE001
         # Narrow the log level: config missing is expected in dev, not a bug.
@@ -241,40 +344,46 @@ def _get_explanation(
     base_schedule: dict,
     new_schedule: dict,
     evidence_envelope: dict | None,
+    user_query: str | None = None,
 ) -> str:
     """
     Produce a natural-language explanation for the what-if result.
 
-    Priority order:
-      1. explain_conflict(evidence_envelope) when there are new rejections
-         (evidence list is non-empty) — Granite narrates why they failed.
-      2. explain_outcome(operations, base, new) when the re-solve succeeded
-         with no new rejections — Granite narrates what changed positively.
-      3. Factual fallback string when Granite is unavailable.
+    Always uses explain_outcome() so the narrative is framed as "what did your
+    change accomplish?" rather than "why was this rejected?". Conflict evidence
+    (when present) is passed as a condensed summary so Granite can mention
+    which requests are still blocked — without hijacking the frame.
+
+    Falls back to a factual string when Granite is unavailable.
     """
-    has_conflict_evidence = bool(
-        evidence_envelope and evidence_envelope.get("evidence")
-    )
+    # Condense conflict evidence into a compact summary for the outcome prompt.
+    # Only include reason_codes + conflicts — not the full feasibility dump.
+    conflict_summary = None
+    if evidence_envelope and evidence_envelope.get("evidence"):
+        conflict_summary = [
+            {
+                "request_id": r["request_id"],
+                "reason_codes": r.get("reason_codes", []),
+                "conflicts": [
+                    {
+                        "conflicting_request_id": c["conflicting_request_id"],
+                        "station_id": c["station_id"],
+                        "overlap_seconds": c["overlap_seconds"],
+                    }
+                    for c in r.get("conflicts", [])
+                ],
+            }
+            for r in evidence_envelope["evidence"]
+        ]
 
-    if has_conflict_evidence:
-        try:
-            from backend.ai.explain import explain_conflict
-            return explain_conflict(
-                evidence_envelope,
-                request_id=_first_unscheduled_id(intent, new_schedule),
-            )
-        except Exception as exc:  # noqa: BLE001
-            logger.info(
-                "explain_conflict unavailable (%s: %s) — trying outcome explanation.",
-                type(exc).__name__, exc,
-            )
-
-    # No conflict evidence (everything scheduled) or explain_conflict failed —
-    # ask Granite to narrate the positive outcome instead.
     try:
         from backend.ai.explain import explain_outcome
         ops_dicts = [op.model_dump(exclude_none=True) for op in intent.operations]
-        return explain_outcome(ops_dicts, base_schedule, new_schedule)
+        return explain_outcome(
+            ops_dicts, base_schedule, new_schedule,
+            user_query=user_query,
+            conflict_summary=conflict_summary,
+        )
     except Exception as exc:  # noqa: BLE001
         logger.info(
             "explain_outcome unavailable (%s: %s) — using operation fallback.",
@@ -366,6 +475,7 @@ def process_what_if_query(request: WhatIfRequest) -> WhatIfResponse:
             {
                 "request_id": r["request_id"],
                 "satellite_id": r.get("satellite_id", ""),
+                "current_priority": r.get("priority", 5),
             }
             for r in base_scenario.get("requests", [])
         ],
@@ -377,7 +487,17 @@ def process_what_if_query(request: WhatIfRequest) -> WhatIfResponse:
     }
 
     # 2. Parse user query → structured operations  (P3, with fallback)
-    intent = _parse_intent(request.user_query, scenario_context)
+    intent = _parse_intent(request.user_query, scenario_context, conversation_history=request.conversation_history)
+
+    # Short-circuit: return clarification question without running the solver.
+    if intent.intent == "NEEDS_CLARIFICATION":
+        return WhatIfResponse(
+            what_if_id=what_if_id,
+            base_scenario_id=request.base_scenario_id,
+            user_query=request.user_query,
+            interpretation=intent,
+            result=None,
+        )
 
     result = None
 
@@ -411,7 +531,10 @@ def process_what_if_query(request: WhatIfRequest) -> WhatIfResponse:
                 _enrich_unscheduled_requests(new_schedule, evidence_envelope)
 
         # 8. Natural-language explanation  (P3, with op-based fallback)
-        explanation = _get_explanation(intent, base_schedule, new_schedule, evidence_envelope)
+        explanation = _get_explanation(
+            intent, base_schedule, new_schedule, evidence_envelope,
+            user_query=request.user_query,
+        )
 
         result = WhatIfResult(
             solver_status=new_schedule["solver"]["status"],

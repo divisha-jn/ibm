@@ -53,6 +53,7 @@ class ExplainRequest(BaseModel):
     scenario_id: str
     request_id: str
     user_question: Optional[str] = None  # free-text question to focus Granite's answer
+    conversation_history: List[Dict[str, Any]] = []  # prior turns for Granite context
 
 class ExplainEvidence(BaseModel):
     reason_codes: List[str]
@@ -64,6 +65,7 @@ class ExplainResponse(BaseModel):
     request_id: str
     explanation: str
     evidence: Optional[ExplainEvidence] = None  # None when pipeline is down or request was scheduled
+    clarification_question: Optional[str] = None  # populated when question is too vague to answer
 
 # ---------------------------------------------------------------------------
 # Contract #7 — what_if
@@ -72,6 +74,7 @@ class ExplainResponse(BaseModel):
 class WhatIfRequest(BaseModel):
     base_scenario_id: str
     user_query: str
+    conversation_history: List[Dict[str, Any]] = []  # prior turns for Granite context
 
 class IntentOperation(BaseModel):
     """
@@ -90,10 +93,11 @@ class IntentOperation(BaseModel):
     value: Optional[int] = None
 
 class IntentInterpretation(BaseModel):
-    intent: str                        # "MODIFY_SCENARIO" | "UNSUPPORTED"
+    intent: str                        # "MODIFY_SCENARIO" | "UNSUPPORTED" | "NEEDS_CLARIFICATION"
     operations: List[IntentOperation]
     requires_resolve: bool
     error: Optional[str] = None        # populated when intent == "UNSUPPORTED"
+    clarification_question: Optional[str] = None  # populated when intent == "NEEDS_CLARIFICATION"
 
 class WhatIfImpact(BaseModel):
     newly_scheduled: List[str]
@@ -206,6 +210,7 @@ class RiskRequest(BaseModel):
     scenario_id: str
     request_id: str
     include_weather: bool = True  # set False to skip the NASA DONKI call
+    conversation_history: List[Dict[str, Any]] = []  # prior turns for Granite context
 
 class RiskResponse(BaseModel):
     scenario_id: str
