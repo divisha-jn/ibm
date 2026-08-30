@@ -55,27 +55,6 @@ export async function saveChatTurn(
   }
 }
 
-export async function fetchExplanation(
-  scenarioId: string,
-  requestId: string,
-  userQuestion?: string,
-  conversationHistory: ChatTurnOut[] = [],
-) {
-  const res = await fetch(`${API_BASE}/explain`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      scenario_id: scenarioId,
-      request_id: requestId,
-      user_question: userQuestion,
-      conversation_history: conversationHistory,
-    }),
-  });
-  if (!res.ok) throw new Error(`Explain failed: ${res.status}`);
-  const data = await res.json();
-  return data.explanation;
-}
-
 export async function fetchSchedule() {
   const res = await fetch(`${API_BASE}/schedule`);
   const data = await res.json();
@@ -103,6 +82,7 @@ export interface WhatIfResponse {
     proposed_schedule: Record<string, any>;
     explanation: string;
     can_apply: boolean;
+    conflict_evidence?: Record<string, any> | null;
   } | null;
 }
 

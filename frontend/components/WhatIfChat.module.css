@@ -34,12 +34,12 @@
 }
 
 .history {
-  flex: 1;
+  max-height: 290px;
   overflow-y: auto;
+  padding-right: 4px;
   display: flex;
   flex-direction: column;
   gap: 16px;
-  padding-right: 4px;
 }
 
 .emptyState {
