@@ -17,7 +17,8 @@
   border: 1px solid var(--border);
   border-radius: 4px;
   padding: 20px;
-  margin-top: 24px;
+  height: 100%;
+  box-sizing: border-box;
 }
 
 .title {
@@ -192,4 +193,36 @@
   font-family: "IBM Plex Mono", monospace;
   font-size: 11px;
   color: var(--text-dim);
+}
+
+.wrapper {
+  transition: opacity 0.6s ease, filter 0.6s ease;
+}
+
+.dimmed {
+  opacity: 0.38;
+  filter: grayscale(1);
+}
+
+.alive {
+  opacity: 1;
+  filter: grayscale(0);
+}
+
+.dimLabel {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-top: 8px;
+}
+
+.levelNoData {
+  border-color: var(--text-dim);
+  color: var(--text-dim);
+}
+
+.badgeNoData {
+  background: transparent;
+  color: var(--text-dim);
+  border: 1px solid var(--border);
 }

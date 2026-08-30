@@ -23,6 +23,7 @@ interface Props {
 
 export default function MissionGantt({ selectedMission, onSelectMission }: Props) {
   const [missions, setMissions] = useState<Mission[]>([]);
+  const [now, setNow] = useState<number | null>(null);
 
   useEffect(() => {
     fetchSchedule()
@@ -30,23 +31,29 @@ export default function MissionGantt({ selectedMission, onSelectMission }: Props
       .catch((err) => console.error("Failed to load schedule:", err));
   }, []);
 
+  // Live sweep line — updates every 30s, no need for per-second precision
+  useEffect(() => {
+  setNow(Date.now()); // set once on mount, client-side only — avoids SSR/client time mismatch
+  const id = setInterval(() => setNow(Date.now()), 30000);
+  return () => clearInterval(id);
+  }, []);
+
+  // Always show a full 24h window, anchored to the start of the day of the
+  // earliest mission (or today, if nothing's loaded yet) — per team request,
+  // rather than a horizon that shrinks to fit whatever data happens to exist.
   const horizonStart = useMemo(() => {
-    if (missions.length === 0) return Date.now();
-    const starts = missions
-      .filter((m) => m.visibility_start)
-      .map((m) => new Date(m.visibility_start).getTime());
-    return starts.length ? Math.min(...starts) : Date.now();
+    const timed = missions.filter((m) => m.visibility_start);
+    const anchor = timed.length
+      ? Math.min(...timed.map((m) => new Date(m.visibility_start).getTime()))
+      : Date.now();
+    const d = new Date(anchor);
+    d.setMinutes(0, 0, 0);
+    d.setHours(0);
+    return d.getTime();
   }, [missions]);
 
-  const horizonEnd = useMemo(() => {
-    if (missions.length === 0) return Date.now() + 3600000;
-    const ends = missions
-      .filter((m) => m.visibility_end)
-      .map((m) => new Date(m.visibility_end).getTime());
-    return ends.length ? Math.max(...ends) : Date.now() + 3600000;
-  }, [missions]);
-
-  const totalMinutes = Math.max((horizonEnd - horizonStart) / 60000, 1);
+  const horizonEnd = horizonStart + 24 * 60 * 60 * 1000;
+  const totalMinutes = 24 * 60;
 
   const stations = useMemo(
     () => Array.from(new Set(missions.filter((m) => m.visibility_start).map((m) => m.station))),
@@ -55,8 +62,7 @@ export default function MissionGantt({ selectedMission, onSelectMission }: Props
 
   const ticks = useMemo(() => {
     const out: { label: string; pct: number }[] = [];
-    const stepMinutes = totalMinutes > 180 ? 30 : totalMinutes > 60 ? 15 : 5;
-    for (let t = 0; t <= totalMinutes; t += stepMinutes) {
+    for (let t = 0; t <= totalMinutes; t += 60) {
       const date = new Date(horizonStart + t * 60000);
       out.push({
         label: formatTime(date.getTime()),
@@ -64,20 +70,30 @@ export default function MissionGantt({ selectedMission, onSelectMission }: Props
       });
     }
     return out;
-  }, [totalMinutes, horizonStart]);
+  }, [horizonStart]);
 
   const rejected = missions.filter((m) => m.status === "rejected");
+
+  // Sweep line position — only shown if "now" falls inside the visible horizon
+  const sweepPct = now !== null ? ((now - horizonStart) / (horizonEnd - horizonStart)) * 100 : -1;
+  const sweepVisible = now !== null && sweepPct >= 0 && sweepPct <= 100;
 
   return (
     <div className={styles.wrapper}>
       <div className={styles.header}>
-        <span className={styles.title}>Schedule — Planning Horizon</span>
+        <span className={styles.title}>Schedule — 24H Planning Horizon</span>
         <span className={styles.horizon}>
-          {formatTime(horizonStart)} – {formatTime(horizonEnd)}
+          {new Date(horizonStart).toISOString().slice(0, 10)} · {formatTime(horizonStart)} – {formatTime(horizonEnd)} (+24h)
         </span>
       </div>
 
-      <div className={styles.scrollArea}>
+      <div className={styles.scrollArea} style={{ position: "relative" }}>
+        {sweepVisible && (
+          <div className={styles.sweepLine} style={{ left: `${sweepPct}%` }}>
+            <div className={styles.sweepDot} />
+          </div>
+        )}
+
         <div className={styles.axis}>
           {ticks.map((t, i) => (
             <span key={`${t.label}-${i}`} className={styles.axisTick} style={{ left: `${t.pct}%` }}>
@@ -96,7 +112,7 @@ export default function MissionGantt({ selectedMission, onSelectMission }: Props
                   const rawStartPct =
                     (toMinutes(m.visibility_start, horizonStart) / totalMinutes) * 100;
                   const widthPct = Math.max((m.duration_minutes / totalMinutes) * 100, 6);
-                  const startPct = Math.min(rawStartPct, 100 - widthPct);
+                  const startPct = Math.min(Math.max(rawStartPct, 0), 100 - widthPct);
                   const isSelected = selectedMission?.mission_id === m.mission_id;
                   return (
                     <div
@@ -110,6 +126,7 @@ export default function MissionGantt({ selectedMission, onSelectMission }: Props
                       }
                       title={`${m.mission_id} — ${m.status}`}
                     >
+                      <span className={styles.satelliteGlyph}>🛰</span>
                       {m.mission_id}
                     </div>
                   );

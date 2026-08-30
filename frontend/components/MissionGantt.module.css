@@ -156,3 +156,35 @@
   color: #ffd9a0;
   padding: 6px 0;
 }
+
+.sweepLine {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: linear-gradient(to bottom, transparent, #ff9f1c, transparent);
+  z-index: 5;
+  pointer-events: none;
+  transition: left 1s linear;
+}
+
+.sweepDot {
+  position: absolute;
+  top: -4px;
+  left: -3px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #ff9f1c;
+  box-shadow: 0 0 6px 2px rgba(255, 159, 28, 0.6);
+}
+
+.satelliteGlyph {
+  margin-right: 5px;
+  opacity: 0.85;
+}
+
+.selected {
+  filter: brightness(1.3);
+  box-shadow: 0 0 0 1px #e4e7eb;
+}
