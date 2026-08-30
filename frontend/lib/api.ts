@@ -66,6 +66,55 @@ export async function fetchWhatIf(
   return res.json();
 }
 
+export interface RankingMetrics {
+  displaced_count: number;
+  displaced_priority_total: number;
+  rescheduled_count: number;
+  rescheduled_priority_total: number;
+}
+
+export interface AlternativeWindow {
+  rank: number;
+  alternative_type: string;
+  window_id: string;
+  station_id: string;
+  scheduled_start: string;
+  scheduled_end: string;
+  duration_seconds: number;
+  displaced_request_ids: string[];
+  rescheduled_request_ids: string[];
+  ranking_metrics: RankingMetrics;
+}
+
+export interface AlternativesResponse {
+  scenario_id: string;
+  request_id: string;
+  satellite_id?: string | null;
+  // ALTERNATIVES_FOUND | NO_FEASIBLE_ALTERNATIVES | REQUEST_ALREADY_SCHEDULED | PIPELINE_UNAVAILABLE
+  status: string;
+  reason_codes: string[];
+  alternatives: AlternativeWindow[];
+  explanation?: string | null;  // Granite narrative; null when Granite unavailable
+}
+
+export async function fetchAlternatives(
+  scenarioId: string,
+  requestId: string,
+  limit = 3
+): Promise<AlternativesResponse> {
+  const res = await fetch(`${API_BASE}/alternatives`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      scenario_id: scenarioId,
+      request_id: requestId,
+      limit,
+    }),
+  });
+  if (!res.ok) throw new Error(`Alternatives request failed: ${res.status}`);
+  return res.json();
+}
+
 export interface RiskFactorDetail {
   weight: number;
   points: number;
