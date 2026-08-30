@@ -14,6 +14,13 @@ interface UnscheduledRequest {
   request_id: string;
   satellite_id: string;
   reason_codes: string[];
+  conflicts?: {
+    conflicting_request_id: string;
+    station_id: string;
+    overlap_seconds: number;
+    request_priority: number;
+    conflicting_request_priority: number;
+  }[];
 }
 
 interface ScheduleResponse {
@@ -33,21 +40,24 @@ export function mapScheduleToMissions(data: ScheduleResponse): Mission[] {
     status: "scheduled",
   }));
 
-  const rejected: Mission[] = data.unscheduled_requests.map((u) => ({
+  const rejected: Mission[] = data.unscheduled_requests.map((u) => {
+  const conflict = u.conflicts?.[0];
+  return {
     mission_id: u.request_id,
-    station: "UNKNOWN",
+    station: conflict?.station_id ?? "UNKNOWN",
     visibility_start: "",
     visibility_end: "",
-    duration_minutes: 0,
-    priority: 0,
+    duration_minutes: conflict ? conflict.overlap_seconds / 60 : 0,
+    priority: conflict?.request_priority ?? 0,
     status: "rejected",
     rejection: {
       reason: u.reason_codes.join(", "),
-      conflicts_with: "",
-      overlap_minutes: 0,
-      conflicting_priority: 0,
+      conflicts_with: conflict?.conflicting_request_id ?? "",
+      overlap_minutes: conflict ? conflict.overlap_seconds / 60 : 0,
+      conflicting_priority: conflict?.conflicting_request_priority ?? 0,
     },
-  }));
+  };
+});
 
   return [...scheduled, ...rejected];
 }

@@ -66,6 +66,8 @@ on a non-2xx status.
 | `GET /schedule` | < 1s (stub) or a few seconds (live: CelesTrak + Skyfield + CP-SAT) | tens of seconds on a cold visibility-window cache (first request, or every 6h) | Visibility windows are cached with a 6h TTL — only regenerated when stale |
 | `POST /explain` | < 1s (fallback) or a few seconds + Granite call (live) | ~60s | Granite/watsonx call has a 60s timeout (`WATSONX_TIMEOUT_SECONDS` env var, default 60) — this is the number to size your frontend request timeout against |
 | `POST /what-if` | similar to `/schedule` + `/explain` combined (re-solves, then explains) | ~60s+ | Same Granite timeout applies to both the intent-parsing call and the explanation call, so worst case is roughly double |
+| `POST /alternatives` | a few seconds (re-solves once per candidate window, up to `limit`) | tens of seconds if many candidate windows exist | Real re-solves, not a lookup — cost scales with candidate count |
+| `POST /risk` | a few seconds | tens of seconds — includes an `/alternatives`-equivalent re-solve when the request is unscheduled, plus a DONKI space-weather fetch (own 6h cache, ~15s timeout per event type) | See below — `include_alternatives: false` skips the re-solve for a faster, less complete assessment |
 | `POST /what-if/apply` | < 100ms | — | Pure file write, no network calls |
 
 Recommend a frontend timeout of at least **90s** on `/explain` and
@@ -257,6 +259,79 @@ lower `displaced_priority_total`, then `rescheduled_count`, then
 `rescheduled_priority_total`. `displaced_request_ids` are requests that
 would lose their contact entirely; `rescheduled_request_ids` keep a
 contact but at a different time/station.
+
+### `POST /risk`
+
+Operational Risk Index for one request — contract #9
+(`contracts/risk_assessment.example.json`). A **deterministic,
+policy-defined 0–100 index** (see `docs/risk_methodolgy.md` for the exact
+formula and weights) — not a failure probability, not AI-generated.
+
+**Request** — `RiskRequest`:
+```json
+{
+  "scenario_id": "DEMO_001",
+  "request_id": "REQ_001",
+  "include_alternatives": true
+}
+```
+`include_alternatives` is optional, defaults to `true`. When the request is
+unscheduled, this triggers an `/alternatives`-equivalent re-solve so the
+`recovery` factor gets a real `best_alternative` instead of just a
+displacement-difficulty estimate — set `false` if you want a faster,
+partial assessment (e.g. showing risk badges on a full unscheduled list
+where per-row cost matters more than completeness).
+
+**Response `200`** — `RiskResponse`, scheduled example:
+```json
+{
+  "scenario_id": "DEMO_001",
+  "request_id": "REQ_001",
+  "satellite_id": "NORAD_25544",
+  "schedule_status": "SCHEDULED",
+  "assessment_status": "ASSESSED",
+  "contact": {
+    "station_id": "GS_SG_01",
+    "window_id": "VW_0004",
+    "scheduled_start": "2026-08-30T13:25:00Z",
+    "scheduled_end": "2026-08-30T13:30:00Z"
+  },
+  "risk_score": 24,
+  "risk_level": "LOW",
+  "reason_codes": ["SPACE_WEATHER_DATA_UNKNOWN"],
+  "factors": { "...": "6 factors — see contracts/risk_assessment.example.json for the full shape" },
+  "data_quality": { "overall": "PARTIAL", "space_weather": "UNAVAILABLE" },
+  "conflict_evidence": null
+}
+```
+
+`factors` and `data_quality` are intentionally untyped (`Dict[str, Any]`)
+in the Pydantic model — their shape is P2's, and it's richer than is worth
+hand-duplicating into nested response models. **Read
+`contracts/risk_assessment.example.json` for the full worked shape** of
+all 6 factors (`scheduling_flexibility`, `station_redundancy`,
+`conflict_pressure`, `recovery`, `mission_priority`, `space_weather`) —
+each has its own `weight`/`factor_score`/`points`/`metrics`.
+
+Key top-level fields:
+- **`schedule_status`**: `SCHEDULED` | `UNSCHEDULED` | `UNKNOWN` (P4 fallback, see below)
+- **`assessment_status`**: `ASSESSED` (scheduled, has a `risk_score`/`risk_level`) | `UNRESOLVED` (unscheduled — no score, `conflict_evidence` populated instead) | `RISK_UNAVAILABLE` (P4 app-level fallback)
+- **`risk_score`/`risk_level`**: only non-null when `assessment_status == "ASSESSED"`
+- **`conflict_evidence`**: only non-null when `schedule_status == "UNSCHEDULED"` — same shape as `/explain`'s `evidence`
+
+`RISK_UNAVAILABLE` (same fail-inward-with-`200` convention as `/schedule`,
+`/explain`, `/alternatives`) fires when `ortools` is down, `request_id`
+doesn't exist in the scenario, or any step fails — check
+`assessment_status`, not the HTTP status code. In that case every field
+except `scenario_id`/`request_id`/`schedule_status`/`assessment_status` is
+empty/null.
+
+Space weather comes from real NASA DONKI advisories
+(`backend/data/space_weather.py`) over the visibility planning horizon —
+`data_quality.space_weather` is `"UNAVAILABLE"` if DONKI couldn't be
+reached and no cache existed (as on a fresh machine with only the shared
+rate-limited `DEMO_KEY`); the risk engine treats unknown weather as
+elevated risk, never as confirmed-clear.
 
 ### `POST /what-if`
 

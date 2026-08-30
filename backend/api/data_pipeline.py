@@ -10,6 +10,7 @@ conflict evidence:
     P4: build_live_schedule()              →  called from GET /schedule
     P4: build_live_conflict_evidence()     →  called from POST /explain
     P4: build_live_alternatives()          →  called from POST /alternatives
+    P4: build_live_risk()                  →  called from POST /risk
     P4: build_live_what_if_schedule()      →  called from POST /what-if
 
 Design goals
@@ -284,7 +285,11 @@ def build_live_schedule() -> Optional[dict]:
         from backend.solver.scheduler import solve_schedule
         mission_data = _load_mission_requests()
         visibility_data = _get_visibility_data()
-        result = solve_schedule(visibility_data, mission_data)
+        result = solve_schedule(
+            visibility_data,
+            mission_data,
+            deterministic=True,
+        )
         evidence = build_conflict_evidence(
             visibility_data,
             mission_data,
@@ -465,7 +470,11 @@ def build_live_what_if_schedule(
     try:
         from backend.solver.scheduler import solve_schedule
         visibility_data = _get_visibility_data()
-        result = solve_schedule(visibility_data, modified_mission_data)
+        result = solve_schedule(
+            visibility_data,
+            modified_mission_data,
+            deterministic=True,
+        )
         return _backfill_contract_fields(result)
     except Exception as exc:  # noqa: BLE001
         logger.error("build_live_what_if_schedule failed: %s", exc, exc_info=True)

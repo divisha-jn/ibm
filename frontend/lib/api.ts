@@ -66,48 +66,51 @@ export async function fetchWhatIf(
   return res.json();
 }
 
-// ---------------------------------------------------------------------------
-// Chat history — SQLite persistence
-// ---------------------------------------------------------------------------
-
-export interface ChatTurnOut {
-  query: string;
-  type: "explain" | "whatif";
-  explanation: string | null;
-  whatif_response: WhatIfResponse | null;
-  error: string | null;
-  created_at: string;
+export interface RiskFactorDetail {
+  weight: number;
+  points: number;
+  factor_score: number;
+  metrics?: Record<string, any> | null;
+  state?: string | null;
 }
 
-export async function fetchChatHistory(sessionId: string): Promise<ChatTurnOut[]> {
-  const res = await fetch(`${API_BASE}/chat/history/${encodeURIComponent(sessionId)}`);
-  if (!res.ok) return [];           // silently return empty on any failure
-  const data = await res.json();
-  return data.turns ?? [];
+export interface RiskAssessment {
+  scenario_id: string;
+  request_id: string;
+  satellite_id: string;
+  schedule_status: string;       // "SCHEDULED" | "UNSCHEDULED"
+  assessment_status: string;     // "ASSESSED" | "UNRESOLVED" | "PIPELINE_UNAVAILABLE"
+  contact?: {
+    station_id: string;
+    window_id: string;
+    scheduled_start: string;
+    scheduled_end: string;
+  } | null;
+  risk_score?: number | null;    // 0–100
+  risk_level?: string | null;    // "LOW" | "MEDIUM" | "HIGH"
+  reason_codes: string[];
+  factors: Record<string, RiskFactorDetail>;
+  data_quality?: {
+    overall: string;
+    space_weather: string;
+  } | null;
+  narrative?: string | null;
 }
 
-export async function saveChatTurn(
-  sessionId: string,
-  query: string,
-  type: "explain" | "whatif",
-  explanation: string | null,
-  whatifResponse: WhatIfResponse | null,
-  error: string | null,
-): Promise<void> {
-  try {
-    await fetch(`${API_BASE}/chat/history`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        session_id: sessionId,
-        query,
-        type,
-        explanation,
-        whatif_response: whatifResponse,
-        error,
-      }),
-    });
-  } catch {
-    // persistence failure is non-fatal — chat still works in-session
-  }
+export async function fetchRiskAssessment(
+  scenarioId: string,
+  requestId: string,
+  includeWeather = true
+): Promise<RiskAssessment> {
+  const res = await fetch(`${API_BASE}/risk`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      scenario_id: scenarioId,
+      request_id: requestId,
+      include_weather: includeWeather,
+    }),
+  });
+  if (!res.ok) throw new Error(`Risk assessment failed: ${res.status}`);
+  return res.json();
 }

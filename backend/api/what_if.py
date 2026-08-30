@@ -14,9 +14,9 @@ Orchestrates the POST /what-if flow:
 
 Fallback behaviour
 ------------------
-parse_what_if()      → falls back to mock_parse_intent() when Granite
-                       credentials are absent (GraniteConfigurationError) or
-                       Granite returns an unparseable response (IntentParserError).
+parse_what_if()      → falls back to a narrow, validated local parser for
+                       explicit request-priority changes when Granite is
+                       unavailable or returns an invalid response.
 solve_schedule()     → falls back to _MOCK_NEW_SCHEDULE when ortools is
                        unavailable (Python 3.13 dev machines).
 explain_conflict()   → falls back to _build_explanation_from_ops() when
@@ -26,6 +26,7 @@ explain_conflict()   → falls back to _build_explanation_from_ops() when
 
 import json
 import logging
+import re
 import uuid
 from typing import Dict
 
@@ -43,6 +44,7 @@ from backend.api.scenario import (
 )
 from backend.api.comparison import compare_schedules
 from backend.api.data_pipeline import (
+    _enrich_unscheduled_requests,
     build_live_schedule,
     build_live_what_if_schedule,
     build_live_conflict_evidence,
@@ -94,8 +96,79 @@ def _interpretation_from_granite(wi) -> IntentInterpretation:
 
 
 # ---------------------------------------------------------------------------
-# Intent parsing  —  real P3 call with mock fallback
+# Intent parsing  —  real P3 call with validated local fallback
 # ---------------------------------------------------------------------------
+
+_LOCAL_PRIORITY_PATTERNS = (
+    re.compile(
+        r"^\s*(?:what\s+if\s+)?(?:raise|set|bump)\s+"
+        r"(?P<request_id>REQ_[A-Z0-9_]+)(?:'s)?\s+"
+        r"(?:priority\s+)?(?:to|=|is)\s+"
+        r"(?P<priority>[+-]?\d+)\s*\??\s*$",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"^\s*(?:what\s+if\s+)?"
+        r"(?P<request_id>REQ_[A-Z0-9_]+)\s+"
+        r"(?:becomes|is)\s+priority\s+"
+        r"(?P<priority>[+-]?\d+)\s*\??\s*$",
+        re.IGNORECASE,
+    ),
+)
+
+
+def _unsupported_local_intent(error: str) -> IntentInterpretation:
+    return IntentInterpretation(
+        intent="UNSUPPORTED",
+        operations=[],
+        requires_resolve=False,
+        error=error,
+    )
+
+
+def _parse_local_priority_intent(
+    query: str,
+    scenario_context: dict,
+) -> IntentInterpretation:
+    """Parse only an explicit request-priority change after P3 is unavailable."""
+    matches = [pattern.fullmatch(query) for pattern in _LOCAL_PRIORITY_PATTERNS]
+    matches = [match for match in matches if match is not None]
+    if len(matches) != 1:
+        return _unsupported_local_intent(
+            "Local fallback supports only one explicit request priority change."
+        )
+
+    match = matches[0]
+    supplied_request_id = match.group("request_id").upper()
+    known_request_ids = {
+        request.get("request_id", "").upper(): request.get("request_id")
+        for request in scenario_context.get("requests", [])
+        if isinstance(request, dict) and isinstance(request.get("request_id"), str)
+    }
+    request_id = known_request_ids.get(supplied_request_id)
+    if request_id is None:
+        return _unsupported_local_intent(
+            f"Unknown request_id {supplied_request_id!r}."
+        )
+
+    priority = int(match.group("priority"))
+    if not 1 <= priority <= 10:
+        return _unsupported_local_intent(
+            "Priority must be an integer from 1 to 10."
+        )
+
+    return IntentInterpretation(
+        intent="MODIFY_SCENARIO",
+        operations=[
+            IntentOperation(
+                operation="SET_PRIORITY",
+                request_id=request_id,
+                value=priority,
+            )
+        ],
+        requires_resolve=True,
+    )
+
 
 def _parse_intent(
     query: str,
@@ -104,7 +177,7 @@ def _parse_intent(
     """
     Call P3's parse_what_if() and convert the result to IntentInterpretation.
 
-    Falls back to the hardcoded mock when:
+    Falls back to the narrow local priority parser when:
       - Granite credentials are not configured (GraniteConfigurationError)
       - Granite returns an unparseable or invalid response (IntentParserError)
     Both are expected in dev/CI; logged at INFO level, not ERROR.
@@ -117,18 +190,11 @@ def _parse_intent(
     except Exception as exc:  # noqa: BLE001
         # Narrow the log level: config missing is expected in dev, not a bug.
         logger.info(
-            "parse_what_if unavailable (%s: %s) — using demo stub intent.",
+            "parse_what_if unavailable (%s: %s) — using local priority parser.",
             type(exc).__name__, exc,
         )
 
-    # Fallback: always "boost REQ_002 to priority 10" for demo visibility.
-    return IntentInterpretation(
-        intent="MODIFY_SCENARIO",
-        operations=[
-            IntentOperation(operation="SET_PRIORITY", request_id="REQ_002", value=10)
-        ],
-        requires_resolve=True,
-    )
+    return _parse_local_priority_intent(query, scenario_context)
 
 
 # ---------------------------------------------------------------------------
@@ -341,6 +407,8 @@ def process_what_if_query(request: WhatIfRequest) -> WhatIfResponse:
                 new_schedule,
                 mission_data=temp_scenario,
             )
+            if evidence_envelope is not None:
+                _enrich_unscheduled_requests(new_schedule, evidence_envelope)
 
         # 8. Natural-language explanation  (P3, with op-based fallback)
         explanation = _get_explanation(intent, base_schedule, new_schedule, evidence_envelope)
@@ -351,6 +419,7 @@ def process_what_if_query(request: WhatIfRequest) -> WhatIfResponse:
             proposed_schedule=new_schedule,
             explanation=explanation,
             can_apply=using_live,
+            conflict_evidence=evidence_envelope,
         )
 
         if using_live:

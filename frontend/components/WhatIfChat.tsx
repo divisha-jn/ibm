@@ -2,14 +2,9 @@
 
 import { useState, useEffect, useRef } from "react";
 import styles from "./WhatIfChat.module.css";
-import {
-  fetchWhatIf,
-  fetchExplanation,
-  fetchChatHistory,
-  saveChatTurn,
-  WhatIfResponse,
-} from "../lib/api";
+import { fetchWhatIf, fetchExplanation, fetchAlternatives, WhatIfResponse, AlternativesResponse } from "../lib/api";
 import { Mission } from "../data/mockMissions";
+
 
 const SCHEDULED_SUGGESTIONS = [
   "Why was this scheduled here?",
@@ -27,6 +22,7 @@ const REJECTED_SUGGESTIONS = [
   "How much overlap caused the rejection?",
   "What could I change to schedule this?",
   "What if this becomes mandatory?",
+  "Show ranked alternatives",
 ];
 
 // Questions that should route to /what-if instead of /explain
@@ -47,8 +43,9 @@ interface ChatTurn {
   query: string;
   response: WhatIfResponse | null;
   explanation: string | null;
+  alternatives: AlternativesResponse | null;
   error: string | null;
-  type: "explain" | "whatif";
+  type: "explain" | "whatif" | "alternatives";
 }
 
 interface Props {
@@ -108,7 +105,7 @@ export default function WhatIfChat({ scenarioId, selectedMission }: Props) {
 
     setInput("");
     setLoading(true);
-    setTurns((prev) => [...prev, { query: q, response: null, explanation: null, error: null, type: isWhatIfQuestion(q) ? "whatif" : "explain" }]);
+    setTurns((prev) => [...prev, { query: q, response: null, explanation: null, alternatives: null, error: null, type: isWhatIfQuestion(q) ? "whatif" : "explain" }]);
 
     try {
       if (isWhatIfQuestion(q) || !selectedMission) {
@@ -119,7 +116,7 @@ export default function WhatIfChat({ scenarioId, selectedMission }: Props) {
         const response = await fetchWhatIf(scenarioId, enrichedQuery);
         setTurns((prev) => {
           const copy = [...prev];
-          copy[copy.length - 1] = { query: q, response, explanation: null, error: null, type: "whatif" };
+          copy[copy.length - 1] = { query: q, response, explanation: null, alternatives: null, error: null, type: "whatif" };
           return copy;
         });
         saveChatTurn(sessionId, q, "whatif", null, response, null);
@@ -128,7 +125,7 @@ export default function WhatIfChat({ scenarioId, selectedMission }: Props) {
         const explanation = await fetchExplanation(scenarioId, selectedMission.mission_id, q);
         setTurns((prev) => {
           const copy = [...prev];
-          copy[copy.length - 1] = { query: q, response: null, explanation, error: null, type: "explain" };
+          copy[copy.length - 1] = { query: q, response: null, explanation, alternatives: null, error: null, type: "explain" };
           return copy;
         });
         saveChatTurn(sessionId, q, "explain", explanation, null, null);
@@ -143,11 +140,38 @@ export default function WhatIfChat({ scenarioId, selectedMission }: Props) {
         };
         return copy;
       });
-      saveChatTurn(sessionId, q, isWhatIfQuestion(q) ? "whatif" : "explain", null, null, errorMsg);
     } finally {
       setLoading(false);
     }
   }
+
+  async function handleAlternatives() {
+  if (!selectedMission || loading) return;
+  const q = "Show ranked alternatives";
+
+  setLoading(true);
+  setTurns((prev) => [
+    ...prev,
+    { query: q, response: null, explanation: null, alternatives: null, error: null, type: "alternatives" },
+  ]);
+
+  try {
+    const alternatives = await fetchAlternatives(scenarioId, selectedMission.mission_id, 3);
+    setTurns((prev) => {
+      const copy = [...prev];
+      copy[copy.length - 1] = { query: q, response: null, explanation: null, alternatives, error: null, type: "alternatives" };
+      return copy;
+    });
+  } catch (err) {
+    setTurns((prev) => {
+      const copy = [...prev];
+      copy[copy.length - 1] = { ...copy[copy.length - 1], error: "Failed to fetch alternatives — is the backend running?" };
+      return copy;
+    });
+  } finally {
+    setLoading(false);
+  }
+}
 
   function handleKeyDown(e: React.KeyboardEvent) {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -184,7 +208,7 @@ export default function WhatIfChat({ scenarioId, selectedMission }: Props) {
               <button
                 key={s}
                 className={styles.chip}
-                onClick={() => handleSend(s)}
+                onClick={() => (s === "Show ranked alternatives" ? handleAlternatives() : handleSend(s))}
                 disabled={loading}
               >
                 {s}
@@ -207,7 +231,7 @@ export default function WhatIfChat({ scenarioId, selectedMission }: Props) {
           <div key={i} className={styles.turn}>
             <div className={styles.userQuery}>{turn.query}</div>
 
-            {!turn.response && !turn.explanation && !turn.error && (
+            {!turn.response && !turn.explanation && !turn.alternatives && !turn.error && (
               <div className={styles.loadingText}>Thinking...</div>
             )}
 
@@ -253,6 +277,27 @@ export default function WhatIfChat({ scenarioId, selectedMission }: Props) {
                 )}
               </div>
             )}
+            {turn.alternatives && (
+  <div className={styles.response}>
+    <div className={styles.responseLabel}>Ranked Alternatives</div>
+    {turn.alternatives.status === "ALTERNATIVES_FOUND" && turn.alternatives.alternatives.length > 0 ? (
+      turn.alternatives.alternatives.map((alt) => (
+        <div key={alt.window_id} style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid #232931" }}>
+          <strong>#{alt.rank}</strong> — {alt.station_id}, {new Date(alt.scheduled_start).toISOString().slice(11, 16)}–{new Date(alt.scheduled_end).toISOString().slice(11, 16)} UTC
+          <div style={{ fontSize: 12, color: "#7c8792", marginTop: 4 }}>
+            Displaces {alt.ranking_metrics.displaced_count} mission(s), reschedules {alt.ranking_metrics.rescheduled_count}
+          </div>
+        </div>
+      ))
+    ) : turn.alternatives.status === "NO_FEASIBLE_ALTERNATIVES" ? (
+      "No feasible alternative windows were found for this request."
+    ) : turn.alternatives.status === "REQUEST_ALREADY_SCHEDULED" ? (
+      "This request is already scheduled — no alternatives needed."
+    ) : (
+      "Alternatives are unavailable right now (solver pipeline inactive)."
+    )}
+  </div>
+)}
           </div>
         ))}
       </div>
