@@ -99,3 +99,17 @@ The app degrades gracefully — nothing crashes:
 |---|---|
 | `.env` credentials | AI explanations show factual stubs instead of live watsonx.ai responses |
 | `ortools` (Python 3.13) | Schedule shows hardcoded mock data instead of a solved schedule |
+
+---
+
+## How We Used IBM Bob
+
+We used IBM Bob as an AI development partner throughout the project. It helped us:
+
+- Design the frontend-to-backend flow for schedule explanations and what-if scenarios.
+- Implement and refine the FastAPI endpoints, SQLite chat persistence, and React chat interface.
+- Debug intent routing and selected-satellite context handling.
+- Create and improve tests for fallback behavior, conversation history, and prompt construction.
+- Review code paths and identify edge cases, including unbounded conversation context.
+
+IBM Bob accelerated iteration from requirements to working, testable features while the team retained control over the application architecture and final implementation.
