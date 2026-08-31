@@ -244,6 +244,21 @@ def _parse_local_priority_intent(
             f"Which station should go offline? Available: {', '.join(station_ids)}"
         )
 
+    # Explanation questions about an already-selected request are handled by the
+    # frontend's /explain route.  They are not incomplete scenario changes, so
+    # do not ask the operator to identify a request they have already selected.
+    selected_request_id = _resolve_request_id_from_context(query, scenario_context)
+    if selected_request_id and any(
+        phrase in query.lower()
+        for phrase in (
+            "why was", "why is", "why this", "why here", "why scheduled",
+            "why rejected", "why not", "what constraints", "explain",
+        )
+    ):
+        return _unsupported_local_intent(
+            "This is an explanation question for the selected request."
+        )
+
     # --- No match: ask for clarification instead of hard UNSUPPORTED ---
     lower = query.lower()
     if any(kw in lower for kw in ("priority", "mandatory", "station", "duration", "schedule", "disable", "change", "what if", "what would")):

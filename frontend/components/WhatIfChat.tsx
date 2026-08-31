@@ -8,8 +8,9 @@ import { Mission } from "../data/mockMissions";
 const SCHEDULED_SUGGESTIONS = [
   "Why was this scheduled here?",
   "What constraints influenced this decision?",
+  "Were there competing requests at this station?",
+  "Was this the only available window?",
   "Which station and antenna was used?",
-  "What is the priority of this mission?",
   "How long is the scheduled contact?",
 ];
 
@@ -18,7 +19,6 @@ const REJECTED_SUGGESTIONS = [
   "Which constraint caused the rejection?",
   "Which mission conflicted with this one?",
   "How much overlap caused the rejection?",
-  "Was there any feasible visibility window at all?",
   "What could I change to schedule this?",
   "What if this becomes mandatory?",
   "Show ranked alternatives",

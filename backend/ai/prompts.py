@@ -20,8 +20,11 @@ ANSWERING RULES:
       means a window existed but was blocked)
     - "What could I change?" → use conflicts and feasibility to suggest which constraint
       is the blocker (e.g. lower-priority conflicting request, insufficient duration)
-    - Scheduled questions → use station_id, antenna_id, scheduled_start, scheduled_end,
-      duration_seconds, priority.
+    - For Scheduling questions, if "scheduling_rationale" is present, use the evidence to answer the question directly:
+        - window_aos / window_los — the visibility pass the contact was placed in
+        - total_candidate_windows — how many passes were available for this satellite
+        - competing_contacts_at_station — other requests at the same station during
+          that window; use their priorities to explain the trade-off the solver made
   Do not repeat the absence of data more than once.
 - Do NOT infer, guess, or speculate beyond what is explicitly in the evidence.
 - Answer in 2–3 sentences of plain prose. Do not use numbered lists.
@@ -142,16 +145,17 @@ Return plain natural-language prose, not JSON.
 
 
 def _history_messages(conversation_history: list[dict]) -> list[dict[str, str]]:
-    """Convert stored turns into Granite assistant/user message pairs."""
+    """Convert the ten most recent stored turns into Granite message pairs."""
     messages = []
-    for turn in conversation_history:
+    for turn in conversation_history[-10:]:
         if turn.get("query"):
             messages.append({"role": "user", "content": turn["query"]})
         # Use whichever response field is populated
+        what_if_reply = (turn.get("whatif_response") or {}).get("result", {}).get("explanation")
         reply = (
             turn.get("explanation")
             or turn.get("narrative")
-            or (turn.get("whatif_response") or {}).get("result", {}).get("explanation") if turn.get("whatif_response") else None
+            or what_if_reply
             or turn.get("error")
         )
         if reply:
