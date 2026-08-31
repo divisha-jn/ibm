@@ -422,6 +422,17 @@ class TestParseIntent:
         assert result.intent == "NEEDS_CLARIFICATION"
         assert result.clarification_question
 
+    def test_selected_request_explanation_does_not_ask_for_clarification(self):
+        query = "[Context: selected request is REQ_001] Why was this scheduled here?"
+        with patch(
+            "backend.ai.intent_parser.parse_what_if",
+            side_effect=RuntimeError("Granite unavailable"),
+        ):
+            result = _parse_intent(query, self._SCENARIO_CTX)
+
+        assert result.intent == "UNSUPPORTED"
+        assert result.clarification_question is None
+
     def test_uses_granite_result_when_parse_what_if_succeeds(self):
         # Simulate parse_what_if returning a valid WhatIfInterpretation-like object
         from unittest.mock import MagicMock

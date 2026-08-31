@@ -92,10 +92,21 @@ def explain_conflict(request: ExplainRequest):
     # Step 1: get the live schedule
     schedule = build_live_schedule()
 
-    # Step 2: build conflict evidence (only populated for unscheduled requests)
+    # Step 2: build conflict evidence (unscheduled) + scheduled rationale
     evidence_envelope = None
+    scheduled_rationale = {}
     if schedule is not None:
         evidence_envelope = build_live_conflict_evidence(schedule)
+        try:
+            from backend.solver.conflicts import build_scheduled_evidence
+            from backend.api.data_pipeline import _get_visibility_data, _load_mission_requests
+            scheduled_rationale = build_scheduled_evidence(
+                _get_visibility_data(),
+                _load_mission_requests(),
+                schedule,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.info("build_scheduled_evidence unavailable (%s) — omitting rationale.", exc)
 
     # Step 3: check whether this request was scheduled or unscheduled
     scheduled_contact = None
@@ -111,6 +122,7 @@ def explain_conflict(request: ExplainRequest):
         request.request_id, evidence_envelope, scheduled_contact,
         user_question=request.user_question,
         conversation_history=request.conversation_history,
+        scheduled_rationale=scheduled_rationale.get(request.request_id),
     )
 
     # Step 5: extract structured evidence (only for unscheduled)
@@ -171,6 +183,7 @@ def _explain_from_evidence(
     *,
     user_question: str | None = None,
     conversation_history: list | None = None,
+    scheduled_rationale: dict | None = None,
 ) -> str:
     """
     Produce a Granite explanation for a scheduling decision.
@@ -191,6 +204,8 @@ def _explain_from_evidence(
             "duration_seconds": scheduled_contact.get("duration_seconds"),
             "priority": scheduled_contact.get("priority"),
         }
+        if scheduled_rationale:
+            scheduled_evidence["scheduling_rationale"] = scheduled_rationale
         try:
             from backend.ai.explain import explain_conflict as granite_explain
             return granite_explain(

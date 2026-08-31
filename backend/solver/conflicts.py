@@ -464,3 +464,90 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+def build_scheduled_evidence(
+    visibility_data,
+    mission_data,
+    schedule_result,
+):
+    """Build scheduling rationale for each successfully scheduled contact.
+
+    For every scheduled contact, records:
+      - The visibility window it was placed in (AOS, LOS, duration)
+      - How many total candidate windows existed for that satellite
+      - Any other requests that were competing at the same station
+        during that window (by priority, so Granite can explain trade-offs)
+
+    Returns a dict keyed by request_id for easy lookup in routes.py.
+    No existing function is modified.
+    """
+    windows = visibility_data["visibility_windows"]
+    requests = mission_data["requests"]
+
+    windows_by_id = {w["window_id"]: w for w in windows}
+    windows_by_satellite = defaultdict(list)
+    for w in windows:
+        windows_by_satellite[w["satellite_id"]].append(w)
+
+    request_lookup = {r["request_id"]: r for r in requests}
+
+    # Build a map of which requests compete per station per window
+    # (any request whose satellite has a visibility window overlapping
+    #  the scheduled contact's window at the same station)
+    scheduled_by_station = defaultdict(list)
+    for contact in schedule_result["scheduled_contacts"]:
+        scheduled_by_station[contact["station_id"]].append(contact)
+
+    rationale = {}
+
+    for contact in schedule_result["scheduled_contacts"]:
+        request_id = contact["request_id"]
+        window_id = contact["window_id"]
+        station_id = contact["station_id"]
+        satellite_id = contact["satellite_id"]
+
+        window = windows_by_id.get(window_id)
+        if window is None:
+            continue
+
+        # All candidate windows for this satellite (same station eligibility
+        # already satisfied by the solver — count all eligible ones)
+        request = request_lookup.get(request_id, {})
+        eligible_stations = set(request.get("eligible_station_ids", []))
+        all_candidate_windows = [
+            w for w in windows_by_satellite.get(satellite_id, [])
+            if w["station_id"] in eligible_stations
+        ]
+
+        # Contacts from OTHER requests scheduled at the same station
+        # that overlap with this window (potential competitors the solver
+        # had to work around)
+        window_start = parse_iso(window["aos"])
+        window_end = parse_iso(window["los"])
+
+        competing = []
+        for other in scheduled_by_station.get(station_id, []):
+            if other["request_id"] == request_id:
+                continue
+            other_start = parse_iso(other["scheduled_start"])
+            other_end = parse_iso(other["scheduled_end"])
+            ov = overlap_seconds(window_start, window_end, other_start, other_end)
+            if ov > 0:
+                other_req = request_lookup.get(other["request_id"], {})
+                competing.append({
+                    "request_id": other["request_id"],
+                    "priority": other_req.get("priority"),
+                    "overlap_seconds": ov,
+                })
+
+        rationale[request_id] = {
+            "window_id": window_id,
+            "window_aos": window["aos"],
+            "window_los": window["los"],
+            "window_duration_seconds": window["duration_seconds"],
+            "total_candidate_windows": len(all_candidate_windows),
+            "competing_contacts_at_station": competing,
+        }
+
+    return rationale
