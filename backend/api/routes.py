@@ -1,6 +1,6 @@
 import logging
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
 from backend.api.schemas import (
     ExplainRequest,
     ExplainResponse,
@@ -8,19 +8,13 @@ from backend.api.schemas import (
     ConflictRecord,
     WhatIfRequest,
     WhatIfResponse,
-    ApplyWhatIfRequest,
-    ApplyWhatIfResponse,
     AlternativesRequest,
     AlternativesResponse,
     RiskRequest,
     RiskResponse,
     ScheduleResult,
 )
-from backend.api.what_if import (
-    process_what_if_query,
-    apply_what_if,
-    WhatIfNotApplicableError,
-)
+from backend.api.what_if import process_what_if_query
 from backend.api.data_pipeline import (
     build_live_schedule,
     build_live_conflict_evidence,
@@ -368,25 +362,3 @@ def what_if_scenario(request: WhatIfRequest):
     return process_what_if_query(request)
 
 
-@router.post("/what-if/apply", response_model=ApplyWhatIfResponse)
-def apply_what_if_route(request: ApplyWhatIfRequest):
-    """
-    Commit a previously computed /what-if result as the new scenario
-    baseline. Overwrites data/mission_requests.json so subsequent /schedule
-    and /what-if calls start from the applied state.
-
-    Only what-if results computed against the live solver (can_apply=True
-    in the original /what-if response) are applicable — mock-fallback
-    results, unknown ids, and already-applied ids all 404.
-    """
-    try:
-        schedule = apply_what_if(request.what_if_id)
-    except WhatIfNotApplicableError as exc:
-        raise HTTPException(status_code=404, detail=str(exc))
-
-    return ApplyWhatIfResponse(
-        applied=True,
-        what_if_id=request.what_if_id,
-        scenario_id=schedule["scenario_id"],
-        schedule=schedule,
-    )

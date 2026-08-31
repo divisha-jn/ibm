@@ -24,11 +24,9 @@ explain_conflict()   → falls back to _build_explanation_from_ops() when
                        pipeline is not running.
 """
 
-import json
 import logging
 import re
 import uuid
-from typing import Dict
 
 from backend.api.schemas import (
     IntentInterpretation,
@@ -40,7 +38,6 @@ from backend.api.schemas import (
 from backend.api.scenario import (
     load_scenario,
     apply_operations_to_scenario,
-    MISSION_REQUESTS_PATH,
 )
 from backend.api.comparison import compare_schedules
 from backend.api.data_pipeline import (
@@ -51,17 +48,6 @@ from backend.api.data_pipeline import (
 )
 
 logger = logging.getLogger(__name__)
-
-# In-memory store of what-if results that are eligible to be committed as the
-# new scenario baseline. Keyed by what_if_id; cleared on apply. Only holds
-# results computed against the live solver (can_apply=True) — mock-fallback
-# results are never eligible. Process-lifetime only, matches the rest of the
-# app's single-dev-process demo scope; a restart drops pending what-ifs.
-_PENDING_WHAT_IFS: Dict[str, dict] = {}
-
-
-class WhatIfNotApplicableError(Exception):
-    """Raised when apply_what_if is called with an unknown or expired what_if_id."""
 
 
 # ---------------------------------------------------------------------------
@@ -541,15 +527,8 @@ def process_what_if_query(request: WhatIfRequest) -> WhatIfResponse:
             impact=impact,
             proposed_schedule=new_schedule,
             explanation=explanation,
-            can_apply=using_live,
             conflict_evidence=evidence_envelope,
         )
-
-        if using_live:
-            _PENDING_WHAT_IFS[what_if_id] = {
-                "scenario": temp_scenario,
-                "schedule": new_schedule,
-            }
 
     # intent == "UNSUPPORTED": result stays None (valid per Optional[WhatIfResult])
     return WhatIfResponse(
@@ -561,27 +540,3 @@ def process_what_if_query(request: WhatIfRequest) -> WhatIfResponse:
     )
 
 
-def apply_what_if(what_if_id: str) -> dict:
-    """
-    Commit a previously computed what-if result as the new scenario baseline.
-
-    Overwrites data/mission_requests.json with the mutated scenario from
-    what_if_id, so subsequent /schedule and /what-if calls start from this
-    new state. One-time use — the pending entry is removed on success, so
-    re-applying the same what_if_id raises WhatIfNotApplicableError.
-
-    Raises WhatIfNotApplicableError when what_if_id is unknown, already
-    applied, or was computed without the live solver (can_apply=False).
-    """
-    pending = _PENDING_WHAT_IFS.pop(what_if_id, None)
-    if pending is None:
-        raise WhatIfNotApplicableError(
-            f"No applicable what-if result for {what_if_id!r} — unknown id, "
-            "already applied, or computed without the live solver."
-        )
-
-    with open(MISSION_REQUESTS_PATH, "w", encoding="utf-8") as f:
-        json.dump(pending["scenario"], f, indent=2)
-
-    logger.info("Applied what-if %s as the new scenario baseline.", what_if_id)
-    return pending["schedule"]

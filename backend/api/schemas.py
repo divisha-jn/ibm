@@ -109,7 +109,6 @@ class WhatIfResult(BaseModel):
     impact: WhatIfImpact
     proposed_schedule: Dict[str, Any]  # full contract #5 shape at runtime
     explanation: str
-    can_apply: bool
     conflict_evidence: Optional[Dict[str, Any]] = None
 
 class WhatIfResponse(BaseModel):
@@ -118,20 +117,6 @@ class WhatIfResponse(BaseModel):
     user_query: str
     interpretation: IntentInterpretation
     result: Optional[WhatIfResult]     # None when intent == "UNSUPPORTED"
-
-# ---------------------------------------------------------------------------
-# What-if apply — commits a previously computed what-if result as the new
-# scenario baseline (persisted to data/mission_requests.json).
-# ---------------------------------------------------------------------------
-
-class ApplyWhatIfRequest(BaseModel):
-    what_if_id: str
-
-class ApplyWhatIfResponse(BaseModel):
-    applied: bool
-    what_if_id: str
-    scenario_id: str
-    schedule: Dict[str, Any]  # full contract #5 shape — the newly-committed baseline
 
 # ---------------------------------------------------------------------------
 # Contract #8 — ranked alternatives (contracts/alternatives.example.json).
