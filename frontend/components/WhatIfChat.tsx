@@ -7,9 +7,10 @@ import { Mission } from "../data/mockMissions";
 
 const SCHEDULED_SUGGESTIONS = [
   "Why was this scheduled here?",
-  "Why this time slot?",
   "What constraints influenced this decision?",
-  "What would happen if I changed the priority?",
+  "Which station and antenna was used?",
+  "What is the priority of this mission?",
+  "How long is the scheduled contact?",
 ];
 
 const REJECTED_SUGGESTIONS = [
@@ -17,6 +18,7 @@ const REJECTED_SUGGESTIONS = [
   "Which constraint caused the rejection?",
   "Which mission conflicted with this one?",
   "How much overlap caused the rejection?",
+  "Was there any feasible visibility window at all?",
   "What could I change to schedule this?",
   "What if this becomes mandatory?",
   "Show ranked alternatives",
@@ -96,7 +98,7 @@ export default function WhatIfChat({ scenarioId, selectedMission }: Props) {
   function buildClarifiedQuery(q: string): string {
     const lastTurn = turns[turns.length - 1];
     if (lastTurn?.clarification_question && lastTurn?.pending_clarification_for) {
-      return `${lastTurn.pending_clarification_for} — clarification: ${q}`;
+      return `${lastTurn.pending_clarification_for} — clarification needed: ${lastTurn.clarification_question} — answer: ${q}`;
     }
     return q;
   }
@@ -138,6 +140,10 @@ export default function WhatIfChat({ scenarioId, selectedMission }: Props) {
           };
           return copy;
         });
+        // Save to history so Granite has context when the user answers
+        const saved: ChatTurnOut = { query: rawQ, type: "clarification", explanation: cq, whatif_response: null, risk_response: null, error: null, created_at: new Date().toISOString() };
+        setHistory((h) => [...h, saved]);
+        saveChatTurn(sessionId, rawQ, "clarification", cq, null, null);
 
       } else if (intent === "UNSUPPORTED" && selectedMission) {
         // Not a what-if command — route to /explain

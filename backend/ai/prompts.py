@@ -7,15 +7,23 @@ Your job is to explain a scheduling decision to an operator using only the
 deterministic solver evidence supplied to you.
 
 ANSWERING RULES:
-- Answer directly from the evidence supplied. Do not ask for clarification
-  unless the evidence dict is completely empty or no request_id is present at all.
-- If a detail (e.g. competing requests, alternative slots) is not in the evidence,
-  state it briefly in one clause ("no competing requests were recorded") and move on.
+- When the operator asks a specific question (provided as "The operator is specifically
+  asking:"), answer THAT question directly and only that question. Do not give a
+  generic scheduling summary — focus your answer on exactly what was asked.
+- Use the evidence fields that are relevant to the question:
+    - "Why rejected?" / "Which constraint?" → use reason_codes
+    - "Which mission conflicted?" → use conflicts[].conflicting_request_id
+    - "How much overlap?" → use conflicts[].overlap_seconds
+    - "Priority comparison?" → use conflicts[].request_priority vs conflicting_request_priority
+    - "Feasible window?" → use reason_codes (NO_ELIGIBLE_VISIBILITY_WINDOW or
+      INSUFFICIENT_WINDOW_DURATION means no feasible window; ANTENNA_RESOURCE_CONFLICT
+      means a window existed but was blocked)
+    - "What could I change?" → use conflicts and feasibility to suggest which constraint
+      is the blocker (e.g. lower-priority conflicting request, insufficient duration)
+    - Scheduled questions → use station_id, antenna_id, scheduled_start, scheduled_end,
+      duration_seconds, priority.
   Do not repeat the absence of data more than once.
-- For a SCHEDULED request: explain what was decided (station, time window, priority)
-  and, where inferable, why this slot — e.g. it was the earliest available visibility
-  window with no conflicts at that station.
-- For an UNSCHEDULED request: explain the conflict or constraint that prevented scheduling.
+- Do NOT infer, guess, or speculate beyond what is explicitly in the evidence.
 - Answer in 2–3 sentences of plain prose. Do not use numbered lists.
 
 GROUNDING RULES:
@@ -68,12 +76,19 @@ Rules:
 8. If the context contains "[Context: selected request is REQ_XXX]", use that
    request_id for any operation that needs one, unless the user explicitly names
    a different request.
-9. Only return UNSUPPORTED when the intent genuinely cannot be resolved — e.g.
-   the operation is not in the allowed list.
-   Always prefer a reasonable assumption or NEEDS_CLARIFICATION over UNSUPPORTED.
-10. Return NEEDS_CLARIFICATION when the intent is clear (e.g. SET_PRIORITY) but
-    a required field is missing and cannot be inferred. Include a short, specific
-    question in clarification_question.
+9. Return UNSUPPORTED when:
+   - The user is asking an explanation or information question (e.g. "Why was
+     this scheduled?", "Why this time slot?", "What constraints influenced
+     this?", "Why was this rejected?", "Which constraint caused this?").
+     These start with "Why", "What", "How", "Which", "When", etc. and are NOT
+     commands to change something — they must always be UNSUPPORTED so the
+     explain pipeline can handle them.
+   - The operation is not in the allowed list.
+   Do NOT return NEEDS_CLARIFICATION for explanation questions — return UNSUPPORTED.
+10. Return NEEDS_CLARIFICATION only when the user is clearly issuing a what-if
+    command (e.g. SET_PRIORITY, DISABLE_STATION) but a required field is missing
+    and cannot be inferred. Include a short, specific question in
+    clarification_question.
 11. requires_resolve must be true for MODIFY_SCENARIO, false for all others.
 12. Return JSON only. No markdown fences and no explanatory text.
 
