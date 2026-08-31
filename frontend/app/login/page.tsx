@@ -27,6 +27,7 @@ export default function LoginPage() {
       style={{
         minHeight: "100vh",
         background: "#0a0d10",
+        backgroundImage: "repeating-linear-gradient(0deg, rgba(255,255,255,0.018) 0px, rgba(255,255,255,0.018) 1px, transparent 1px, transparent 40px)",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",

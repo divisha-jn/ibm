@@ -120,11 +120,6 @@
   color: #ffd9a0;
 }
 
-.selected {
-  outline: 2px solid #ffffff;
-  outline-offset: 1px;
-  filter: brightness(1.4);
-}
 
 .legend {
   display: flex;
@@ -186,7 +181,15 @@
 
 .selected {
   filter: brightness(1.3);
-  box-shadow: 0 0 0 1px #e4e7eb;
+  box-shadow: 0 0 0 2px #0f62fe, 0 0 12px rgba(15, 98, 254, 0.4);
+}
+
+.scheduled.selected {
+  box-shadow: 0 0 0 2px #0f62fe, 0 0 12px rgba(15, 98, 254, 0.4);
+}
+
+.rejected.selected {
+  box-shadow: 0 0 0 2px #ff9f1c, 0 0 12px rgba(255, 159, 28, 0.4);
 }
 
 .dayNav {

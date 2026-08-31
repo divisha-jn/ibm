@@ -85,8 +85,13 @@ if (!dimText && !loading) {
 const lvl = hasScore ? levelClass(risk!.risk_level) : "NoData";
 const isAlive = hasAnswer; // full brightness whenever we have any real answer
 
+  const accentColor = lvl === "Low" ? "#24a148" : lvl === "Medium" ? "#ff9f1c" : lvl === "High" ? "#da1e28" : "#232931";
+
   return (
-    <div className={`${styles.wrapper} ${isAlive ? styles.alive : styles.dimmed}`}>
+    <div
+      className={`${styles.wrapper} ${isAlive ? styles.alive : styles.dimmed}`}
+      style={{ borderTop: `2px solid ${accentColor}` }}
+    >
        <div className={styles.title}>
         Operational Risk{risk ? ` — ${risk.request_id}` : ""}
         </div>
@@ -96,11 +101,34 @@ const isAlive = hasAnswer; // full brightness whenever we have any real answer
         )}
 
         <div className={styles.scoreRow}>
-        <div className={`${styles.scoreCircle} ${styles[`level${lvl}`]}`}>
-          <span className={styles.scoreNumber}>
-            {hasScore ? risk!.risk_score : "—"}
-          </span>
-          <span className={styles.scoreMax}>/ 100</span>
+        <div className={styles.scoreGauge}>
+          {(() => {
+            const radius = 30;
+            const circumference = 2 * Math.PI * radius;
+            const score = hasScore ? risk!.risk_score! : 0;
+            const fill = (score / 100) * circumference;
+            const colorMap: Record<string, string> = { Low: "#24a148", Medium: "#ff9f1c", High: "#da1e28", NoData: "#7c8792" };
+            const color = colorMap[lvl] ?? "#7c8792";
+            return (
+              <svg width="72" height="72" viewBox="0 0 72 72">
+                <circle cx="36" cy="36" r={radius} fill="none" stroke="#232931" strokeWidth="4" />
+                <circle
+                  cx="36" cy="36" r={radius} fill="none"
+                  stroke={color} strokeWidth="4"
+                  strokeDasharray={`${fill} ${circumference}`}
+                  strokeDashoffset={circumference * 0.25}
+                  strokeLinecap="round"
+                  style={{ transition: "stroke-dasharray 0.6s ease" }}
+                />
+                <text x="36" y="33" textAnchor="middle" fill={color} fontSize="16" fontWeight="600" fontFamily="IBM Plex Mono, monospace">
+                  {hasScore ? risk!.risk_score : "—"}
+                </text>
+                <text x="36" y="46" textAnchor="middle" fill="#7c8792" fontSize="9" fontFamily="IBM Plex Mono, monospace">
+                  / 100
+                </text>
+              </svg>
+            );
+          })()}
         </div>
         <div>
           <span className={`${styles.levelBadge} ${styles[`badge${lvl}`]}`}>
@@ -135,13 +163,11 @@ const isAlive = hasAnswer; // full brightness whenever we have any real answer
                 <div className={styles.factorBarTrack}>
                   <div
                     className={styles.factorBarFill}
-                    style={{
-                      width: `${
-                        factor.points != null && factor.weight
-                          ? (factor.points / factor.weight) * 100
-                          : 0
-                      }%`,
-                    }}
+                    style={(() => {
+                      const pct = factor.points != null && factor.weight ? (factor.points / factor.weight) * 100 : 0;
+                      const color = pct < 40 ? "#24a148" : pct < 70 ? "#ff9f1c" : "#da1e28";
+                      return { width: `${pct}%`, background: color };
+                    })()}
                   />
                 </div>
                 <span className={styles.factorPoints}>

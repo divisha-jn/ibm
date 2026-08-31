@@ -13,7 +13,8 @@
   color: var(--text);
   font-family: "IBM Plex Sans", system-ui, sans-serif;
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-top: 2px solid var(--accent);
+  border-radius: 6px;
   padding: 20px;
   display: flex;
   flex-direction: column;
@@ -40,6 +41,21 @@
   display: flex;
   flex-direction: column;
   gap: 16px;
+  mask-image: linear-gradient(to bottom, black 80%, transparent 100%);
+  -webkit-mask-image: linear-gradient(to bottom, black 80%, transparent 100%);
+}
+
+.history::-webkit-scrollbar {
+  width: 3px;
+}
+
+.history::-webkit-scrollbar-track {
+  background: var(--panel);
+}
+
+.history::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 2px;
 }
 
 .emptyState {
@@ -110,6 +126,7 @@
 
 .chip:hover:not(:disabled) {
   border-color: var(--accent);
+  border-left: 2px solid var(--accent);
   background: var(--accent-dim);
 }
 
@@ -169,11 +186,22 @@
   color: var(--bad);
 }
 
+@keyframes ellipsis {
+  0%   { content: "·"; }
+  33%  { content: "··"; }
+  66%  { content: "···"; }
+  100% { content: "·"; }
+}
+
 .loadingText {
   color: var(--text-dim);
   font-family: "IBM Plex Mono", monospace;
   font-size: 13px;
-  font-style: italic;
+}
+
+.loadingText::after {
+  content: "·";
+  animation: ellipsis 1.2s steps(1, end) infinite;
 }
 
 .inputRow {

@@ -36,25 +36,30 @@ export default function DashboardPage() {
       style={{
         minHeight: "100vh",
         background: "#0a0d10",
+        borderTop: "3px solid #0f62fe",
         padding: "40px 24px",
         fontFamily: "IBM Plex Sans, system-ui, sans-serif",
       }}
     >
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24, paddingBottom: 20, borderBottom: "1px solid #2d3540" }}>
   <h1
     style={{
       color: "#e4e7eb",
-      fontSize: 20,
-      letterSpacing: "0.04em",
+      fontSize: 16,
+      letterSpacing: "0.1em",
+      textTransform: "uppercase",
+      fontWeight: 600,
     }}
   >
-    MISSION OPS COPILOT
+    Mission Ops Copilot
   </h1>
   <button
     onClick={() => {
       sessionStorage.removeItem("mission-ops-authed");
       router.push("/login");
     }}
+    onMouseEnter={(e) => { (e.target as HTMLButtonElement).style.borderColor = "#0f62fe"; (e.target as HTMLButtonElement).style.color = "#cfe0ff"; }}
+    onMouseLeave={(e) => { (e.target as HTMLButtonElement).style.borderColor = "#232931"; (e.target as HTMLButtonElement).style.color = "#7c8792"; }}
     style={{
       background: "transparent",
       border: "1px solid #232931",
@@ -64,6 +69,7 @@ export default function DashboardPage() {
       fontFamily: "IBM Plex Mono, monospace",
       fontSize: 12,
       cursor: "pointer",
+      transition: "border-color 0.15s ease, color 0.15s ease",
     }}
   >
     Log out

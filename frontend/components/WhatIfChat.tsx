@@ -291,7 +291,7 @@ export default function WhatIfChat({ scenarioId, selectedMission }: Props) {
             <div className={styles.userQuery}>{turn.query}</div>
 
             {!turn.response && !turn.explanation && !turn.alternatives && !turn.clarification_question && !turn.error && (
-              <div className={styles.loadingText}>Thinking...</div>
+              <div className={styles.loadingText}>Thinking</div>
             )}
 
             {turn.clarification_question && (
