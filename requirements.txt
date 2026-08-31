@@ -1,3 +1,4 @@
+# Requires Python 3.10–3.12. ortools has no Python 3.13 wheel.
 ortools
 pytest
 skyfield>=1.49

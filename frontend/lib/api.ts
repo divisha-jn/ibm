@@ -81,7 +81,6 @@ export interface WhatIfResponse {
     };
     proposed_schedule: Record<string, any>;
     explanation: string;
-    can_apply: boolean;
     conflict_evidence?: Record<string, any> | null;
   } | null;
 }
