@@ -1,5 +1,7 @@
 # Mission Ops Scheduling Copilot
 
+**Team: Bob In Orbit**
+
 An AI-assisted satellite ground-station scheduling tool. Built for the IBM Bob Hackathon.
 
 ---
