@@ -169,6 +169,7 @@ def test_live_explain_selects_target_from_real_p2_evidence(monkeypatch, tmp_path
     assert payload == {
         "request_id": target_request_id,
         "explanation": ai_response,
+        "clarification_question": None,
         "evidence": {
             "reason_codes": ["ANTENNA_RESOURCE_CONFLICT"],
             "conflicts": [

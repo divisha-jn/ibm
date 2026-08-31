@@ -137,21 +137,13 @@ def test_what_if_solver_and_evidence_share_modified_temp_scenario(monkeypatch):
         base_scenario_id=baseline_scenario["scenario_id"],
         user_query=f"Raise {TARGET_REQUEST_ID} to priority 10",
     )
-    what_if._PENDING_WHAT_IFS.clear()
     previous_profile = sys.getprofile()
     sys.setprofile(record_real_data_flow)
     try:
         first_response = what_if.process_what_if_query(request)
         second_response = what_if.process_what_if_query(request)
-        pending_schedules = [
-            copy.deepcopy(
-                what_if._PENDING_WHAT_IFS[response.what_if_id]["schedule"]
-            )
-            for response in (first_response, second_response)
-        ]
     finally:
         sys.setprofile(previous_profile)
-        what_if._PENDING_WHAT_IFS.clear()
 
     assert _priority(baseline_scenario, TARGET_REQUEST_ID) == 5
     assert len(observed["apply_inputs"]) == 2
@@ -196,12 +188,8 @@ def test_what_if_solver_and_evidence_share_modified_temp_scenario(monkeypatch):
         ] != 5
 
     proposed_identities = []
-    for response, pending_schedule in zip(
-        (first_response, second_response),
-        pending_schedules,
-    ):
+    for response in (first_response, second_response):
         assert response.result is not None
-        assert response.result.can_apply is True
         scheduled_ids = {
             contact["request_id"]
             for contact in response.result.proposed_schedule["scheduled_contacts"]
@@ -243,10 +231,6 @@ def test_what_if_solver_and_evidence_share_modified_temp_scenario(monkeypatch):
             proposed_unscheduled[0]["conflicts"]
         )
         assert response.result.model_dump()["conflict_evidence"] == exposed_evidence
-        assert pending_schedule == response.result.proposed_schedule
-        assert pending_schedule["unscheduled_requests"][0]["reason_codes"] == [
-            "ANTENNA_RESOURCE_CONFLICT"
-        ]
         proposed_identities.append(
             (
                 tuple(sorted(scheduled_ids)),

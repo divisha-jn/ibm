@@ -4,17 +4,12 @@ Tests for backend/api/what_if.py and backend/api/scenario.py.
 Verifies the full orchestration flow with the real pipeline mocked out,
 so these tests run on any Python version regardless of ortools availability.
 """
-import copy
-import json
-
 import pytest
 from unittest.mock import patch, MagicMock
 
 from backend.api import what_if as what_if_module
 from backend.api.schemas import WhatIfRequest, WhatIfResponse, WhatIfResult
 from backend.api.what_if import (
-    WhatIfNotApplicableError,
-    apply_what_if,
     process_what_if_query,
     _build_explanation_from_ops,
     _interpretation_from_granite,
@@ -206,11 +201,6 @@ class TestProcessWhatIfQuery:
     def test_live_schedule_used_when_available(self):
         resp = self._run(live_what_if=MOCK_NEW_SCHEDULE, live_base=MOCK_BASE_SCHEDULE)
         assert resp.result.solver_status == "OPTIMAL"
-        assert resp.result.can_apply is True
-
-    def test_can_apply_false_when_mock_used(self):
-        resp = self._run(live_what_if=None, live_base=None)
-        assert resp.result.can_apply is False
 
     def test_proposed_schedule_contains_solver_key(self):
         resp = self._run(live_what_if=MOCK_NEW_SCHEDULE, live_base=MOCK_BASE_SCHEDULE)
@@ -296,6 +286,7 @@ class TestInterpretationFromGranite:
         wi.intent = kwargs.get("intent", "MODIFY_SCENARIO")
         wi.requires_resolve = kwargs.get("requires_resolve", True)
         wi.error = kwargs.get("error", None)
+        wi.clarification_question = kwargs.get("clarification_question", None)
         ops = []
         for op_kwargs in kwargs.get("operations", []):
             op = MagicMock()
@@ -400,14 +391,9 @@ class TestParseIntent:
         [
             "Raise REQ_999 priority to 10",
             "Raise REQ_003 priority to 11",
-            "Raise REQ_001 or REQ_003 priority to 10",
-            "Disable GS_SG_01",
         ],
     )
-    def test_local_fallback_rejects_unknown_invalid_ambiguous_or_unsupported(
-        self,
-        query,
-    ):
+    def test_local_fallback_rejects_unknown_or_invalid(self, query):
         with patch(
             "backend.ai.intent_parser.parse_what_if",
             side_effect=RuntimeError("Granite unavailable"),
@@ -419,6 +405,23 @@ class TestParseIntent:
         assert result.requires_resolve is False
         assert result.error
 
+    @pytest.mark.parametrize(
+        "query",
+        [
+            "Raise REQ_001 or REQ_003 priority to 10",
+            "Disable GS_SG_01",
+        ],
+    )
+    def test_local_fallback_asks_clarification_for_ambiguous(self, query):
+        with patch(
+            "backend.ai.intent_parser.parse_what_if",
+            side_effect=RuntimeError("Granite unavailable"),
+        ):
+            result = _parse_intent(query, self._SCENARIO_CTX)
+
+        assert result.intent == "NEEDS_CLARIFICATION"
+        assert result.clarification_question
+
     def test_uses_granite_result_when_parse_what_if_succeeds(self):
         # Simulate parse_what_if returning a valid WhatIfInterpretation-like object
         from unittest.mock import MagicMock
@@ -426,6 +429,7 @@ class TestParseIntent:
         fake_wi.intent = "MODIFY_SCENARIO"
         fake_wi.requires_resolve = True
         fake_wi.error = None
+        fake_wi.clarification_question = None
         fake_op = MagicMock()
         fake_op.operation = "SET_PRIORITY"
         fake_op.request_id = "REQ_001"
@@ -454,7 +458,6 @@ def test_what_if_result_serializes_optional_conflict_evidence():
         },
         proposed_schedule=MOCK_NEW_SCHEDULE,
         explanation="REQ_003 now wins the shared station window.",
-        can_apply=True,
         conflict_evidence={
             "scenario_id": "DEMO_001",
             "evidence": [
@@ -470,44 +473,3 @@ def test_what_if_result_serializes_optional_conflict_evidence():
     assert dumped["conflict_evidence"]["evidence"][0]["request_id"] == "REQ_004"
 
 
-def test_apply_returns_enriched_pending_schedule_and_is_one_time(
-    monkeypatch,
-    tmp_path,
-):
-    mission_path = tmp_path / "mission_requests.json"
-    scenario = copy.deepcopy(BASE_SCENARIO)
-    enriched_schedule = copy.deepcopy(MOCK_NEW_SCHEDULE)
-    enriched_schedule["unscheduled_requests"][0] = {
-        "request_id": "REQ_001",
-        "satellite_id": "NORAD_25544",
-        "reason_codes": ["ANTENNA_RESOURCE_CONFLICT"],
-        "conflicts": [
-            {
-                "conflicting_request_id": "REQ_003",
-                "station_id": "GS_SG_01",
-                "overlap_seconds": 300,
-                "request_priority": 8,
-                "conflicting_request_priority": 10,
-            }
-        ],
-    }
-    what_if_id = "WI_APPLY_TEST"
-
-    monkeypatch.setattr(what_if_module, "MISSION_REQUESTS_PATH", mission_path)
-    what_if_module._PENDING_WHAT_IFS.clear()
-    what_if_module._PENDING_WHAT_IFS[what_if_id] = {
-        "scenario": scenario,
-        "schedule": enriched_schedule,
-    }
-    try:
-        applied_schedule = apply_what_if(what_if_id)
-
-        assert applied_schedule == enriched_schedule
-        assert applied_schedule["unscheduled_requests"][0]["reason_codes"] == [
-            "ANTENNA_RESOURCE_CONFLICT"
-        ]
-        assert json.loads(mission_path.read_text(encoding="utf-8")) == scenario
-        with pytest.raises(WhatIfNotApplicableError):
-            apply_what_if(what_if_id)
-    finally:
-        what_if_module._PENDING_WHAT_IFS.clear()
