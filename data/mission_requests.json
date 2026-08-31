@@ -48,6 +48,38 @@
       "priority": 4,
       "eligible_station_ids": ["GS_SG_01", "GS_PERTH_01"],
       "mandatory": false
+    },
+    {
+      "request_id": "REQ_007",
+      "satellite_id": "NORAD_27424",
+      "required_contact_seconds": 450,
+      "priority": 6,
+      "eligible_station_ids": ["GS_SG_01", "GS_PERTH_01"],
+      "mandatory": false
+    },
+    {
+      "request_id": "REQ_008",
+      "satellite_id": "NORAD_43013",
+      "required_contact_seconds": 450,
+      "priority": 6,
+      "eligible_station_ids": ["GS_SG_01", "GS_PERTH_01"],
+      "mandatory": false
+    },
+    {
+      "request_id": "REQ_009",
+      "satellite_id": "NORAD_48274",
+      "required_contact_seconds": 300,
+      "priority": 5,
+      "eligible_station_ids": ["GS_SG_01", "GS_PERTH_01"],
+      "mandatory": false
+    },
+    {
+      "request_id": "REQ_010",
+      "satellite_id": "NORAD_43013",
+      "required_contact_seconds": 620,
+      "priority": 10,
+      "eligible_station_ids": ["GS_SG_01"],
+      "mandatory": false
     }
   ]
 }
